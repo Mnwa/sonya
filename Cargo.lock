@@ -1985,7 +1985,7 @@ checksum = "2e0c4a743a309662d45f4ede961d7afa4ba4131a59a639f29b0069c3798bbcc2"
 
 [[package]]
 name = "web-queue-meta"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "actix-web",
  "serde",
@@ -1994,7 +1994,7 @@ dependencies = [
 
 [[package]]
 name = "web-queue-proxy"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "actix",
  "actix-web",
@@ -2011,7 +2011,7 @@ dependencies = [
 
 [[package]]
 name = "web-queue-server"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "actix",
  "actix-web",

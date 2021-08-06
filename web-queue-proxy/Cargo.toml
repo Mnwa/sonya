@@ -1,6 +1,6 @@
 [package]
 name = "web-queue-proxy"
-version = "0.1.0"
+version = "0.1.1"
 edition = "2018"
 description = "Proxy for sharding queues of your web queue cluster"
 repository = "https://github.com/Mnwa/web-queue"
