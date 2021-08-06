@@ -21,4 +21,4 @@ tokio = { version = "1", features = ["sync"] }
 async-stream = "0.3"
 env_logger = "0.9"
 log = "0.4"
-web-queue-meta = { path = "../web-queue-meta" }
+web-queue-meta = { version = "0.1", path = "../web-queue-meta" }
