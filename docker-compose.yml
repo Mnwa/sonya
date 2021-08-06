@@ -1,0 +1,25 @@
+version: "3.9"
+services:
+  queue_server-1:
+    hostname: queue-1
+    build:
+      context: .
+      dockerfile: ./web-queue-server/Dockerfile
+    environment:
+      - RUST_LOG=info
+  queue_server-2:
+    hostname: queue-2
+    build:
+      context: .
+      dockerfile: ./web-queue-server/Dockerfile
+    environment:
+      - RUST_LOG=info
+  queue_proxy:
+    build:
+      context: .
+      dockerfile: ./web-queue-proxy/Dockerfile
+    ports:
+      - "8081:8081"
+    environment:
+      - SHARDS=http://queue-1:8080;http://queue-2:8080
+      - RUST_LOG=info
