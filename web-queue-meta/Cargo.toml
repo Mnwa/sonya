@@ -2,6 +2,10 @@
 name = "web-queue-meta"
 version = "0.1.0"
 edition = "2018"
+description = "Common packages for backend and proxy web queue"
+repository = "https://github.com/Mnwa/web-queue"
+readme = "https://github.com/Mnwa/web-queue/blob/master/README.md"
+license = "MIT"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
