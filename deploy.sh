@@ -52,9 +52,9 @@ validate_crates_package "web-queue-meta" "$VERSION"
 validate_crates_package "web-queue-server" "$VERSION"
 validate_crates_package "web-queue-proxy" "$VERSION"
 
-#publish_crates_package "web-queue-meta" "$VERSION"
-#publish_crates_package "web-queue-server" "$VERSION"
-#publish_crates_package "web-queue-proxy" "$VERSION"
+publish_crates_package "web-queue-meta" "$VERSION"
+publish_crates_package "web-queue-server" "$VERSION"
+publish_crates_package "web-queue-proxy" "$VERSION"
 
 publish_docker_package "web-queue-server" "$VERSION" "backend"
 publish_docker_package "web-queue-proxy" "$VERSION" "proxy"
