@@ -1,7 +1,7 @@
 use crate::queue::connection::{BroadcastMessage, QueueConnection};
 use crate::queue::map::Queue;
 use actix_web::middleware::Logger;
-use actix_web::{get, post, web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
+use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
 use actix_web_actors::ws;
 use std::time::{SystemTime, UNIX_EPOCH};
 use web_queue_meta::api::queue_scope_factory;
@@ -25,7 +25,6 @@ async fn subscribe_queue_ws(
     }
 }
 
-#[get("/listen/longpoll/{queue_name}/{uniq_id}")]
 async fn subscribe_queue_longpoll(
     srv: web::Data<RuntimeQueue>,
     info: web::Path<(String, String)>,
@@ -48,7 +47,6 @@ async fn subscribe_queue_longpoll(
     }
 }
 
-#[post("/create/{queue_name}")]
 async fn create_queue(srv: web::Data<RuntimeQueue>, info: web::Path<String>) -> impl Responder {
     let queue_name = info.into_inner();
     let mut guard = srv.write().await;
@@ -58,7 +56,6 @@ async fn create_queue(srv: web::Data<RuntimeQueue>, info: web::Path<String>) -> 
     }
 }
 
-#[post("/send/{queue_name}")]
 async fn send_to_queue(
     srv: web::Data<RuntimeQueue>,
     info: web::Path<String>,
@@ -79,7 +76,6 @@ async fn send_to_queue(
     }
 }
 
-#[post("/close/{queue_name}")]
 async fn close_queue(srv: web::Data<RuntimeQueue>, info: web::Path<String>) -> impl Responder {
     let queue_name = info.into_inner();
     let mut guard = srv.write().await;

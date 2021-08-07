@@ -7,9 +7,7 @@ use actix::Addr;
 use actix_web::client::Client;
 use actix_web::http::StatusCode;
 use actix_web::middleware::Logger;
-use actix_web::{
-    get, post, web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder, ResponseError,
-};
+use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder, ResponseError};
 use actix_web_actors::ws;
 use futures::TryStreamExt;
 use log::error;
@@ -49,7 +47,6 @@ async fn subscribe_queue_ws(
     }
 }
 
-#[get("/listen/longpoll/{queue_name}/{uniq_id}")]
 async fn subscribe_queue_longpoll(
     req: HttpRequest,
     registry: web::Data<Addr<RegistryActor>>,
@@ -94,7 +91,6 @@ async fn subscribe_queue_longpoll(
     }
 }
 
-#[post("/create/{queue_name}")]
 async fn create_queue(
     req: HttpRequest,
     registry: web::Data<Addr<RegistryActor>>,
@@ -126,7 +122,6 @@ async fn create_queue(
     }
 }
 
-#[post("/send/{queue_name}")]
 async fn send_to_queue(
     req: HttpRequest,
     registry: web::Data<Addr<RegistryActor>>,
@@ -166,7 +161,6 @@ async fn send_to_queue(
     }
 }
 
-#[post("/close/{queue_name}")]
 async fn close_queue(req: HttpRequest, registry: web::Data<Addr<RegistryActor>>) -> impl Responder {
     let addresses = get_all_addresses(registry.get_ref()).await;
 
