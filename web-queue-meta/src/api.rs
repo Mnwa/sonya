@@ -16,7 +16,7 @@ macro_rules! queue_scope_factory {
         $subscribe_queue_longpoll:ident,
         $subscribe_queue_ws:ident,
         $service_token:expr
-    ) => {{
+    ) => {
         match $service_token {
             None => web::scope("/queue")
                 .route("/create/{queue_name}", web::post().to($create_queue))
@@ -53,7 +53,7 @@ macro_rules! queue_scope_factory {
                         ),
                 ),
         }
-    }};
+    };
 }
 
 pub fn service_token_guard(service_token: String) -> impl Guard {
