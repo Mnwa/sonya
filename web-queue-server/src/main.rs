@@ -4,8 +4,8 @@ use actix_web::middleware::Logger;
 use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
 use actix_web_actors::ws;
 use std::time::{SystemTime, UNIX_EPOCH};
-use web_queue_meta::api::queue_scope_factory;
 use web_queue_meta::message::EventMessage;
+use web_queue_meta::queue_scope_factory;
 use web_queue_meta::response::BaseQueueResponse;
 
 pub mod queue;
@@ -97,13 +97,13 @@ async fn main() -> tokio::io::Result<()> {
         App::new()
             .wrap(Logger::default())
             .app_data(queue.clone())
-            .service(queue_scope_factory(
+            .service(queue_scope_factory!(
                 create_queue,
                 send_to_queue,
                 close_queue,
                 subscribe_queue_longpoll,
                 subscribe_queue_ws,
-                service_token.clone(),
+                service_token.clone()
             ))
     })
     .bind(address)?

@@ -1,78 +1,62 @@
-use actix_web::dev::{Factory, HttpServiceFactory};
+use actix_web::dev::HttpServiceFactory;
 use actix_web::guard::Guard;
 use actix_web::http::HeaderValue;
-use actix_web::{web, FromRequest, HttpResponse, Responder, Scope};
+use actix_web::{web, HttpResponse};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
-use std::future::Future;
 use std::time::{Duration, SystemTime};
 
 const BEARER: &'static str = "Bearer ";
 
-pub fn queue_scope_factory<
-    CREATE: Factory<ICR, RCR, UCR> + 'static,
-    ICR: FromRequest + 'static,
-    RCR: Future<Output = UCR> + 'static,
-    UCR: Responder + 'static,
-    SEND: Factory<IS, RS, US> + 'static,
-    IS: FromRequest + 'static,
-    RS: Future<Output = US> + 'static,
-    US: Responder + 'static,
-    CLOSE: Factory<ICL, RCL, UCL> + 'static,
-    ICL: FromRequest + 'static,
-    RCL: Future<Output = UCL> + 'static,
-    UCL: Responder + 'static,
-    LONGPOLL: Factory<IL, RL, UL> + 'static,
-    IL: FromRequest + 'static,
-    RL: Future<Output = UL> + 'static,
-    UL: Responder + 'static,
-    WEBSOCKET: Factory<IW, RW, UW> + 'static,
-    IW: FromRequest + 'static,
-    RW: Future<Output = UW> + 'static,
-    UW: Responder + 'static,
->(
-    create_queue: CREATE,
-    send_to_queue: SEND,
-    close_queue: CLOSE,
-    subscribe_queue_longpoll: LONGPOLL,
-    subscribe_queue_ws: WEBSOCKET,
-    service_token: Option<String>,
-) -> Scope {
-    match service_token {
-        None => web::scope("/queue")
-            .route("/create/{queue_name}", web::post().to(create_queue))
-            .route("/send/{queue_name}", web::post().to(send_to_queue))
-            .route("/close/{queue_name}", web::post().to(close_queue))
-            .service(
-                web::scope("/listen")
-                    .route(
-                        "/longpoll/{queue_name}/{uniq_id}",
-                        web::get().to(subscribe_queue_longpoll),
-                    )
-                    .service(web::resource("/ws/{queue_name}/{uniq_id}").to(subscribe_queue_ws)),
-            ),
-        Some(st) => web::scope("/queue")
-            .service(
-                web::scope("")
-                    .guard(service_token_guard(st.clone()))
-                    .route("/create/{queue_name}", web::post().to(create_queue))
-                    .route("/send/{queue_name}", web::post().to(send_to_queue))
-                    .route("/close/{queue_name}", web::post().to(close_queue))
-                    .service(generate_jwt_method_factory(st.clone())),
-            )
-            .service(
-                web::scope("/listen")
-                    .guard(jwt_token_guard(st.clone()))
-                    .route(
-                        "/longpoll/{queue_name}/{uniq_id}",
-                        web::get().to(subscribe_queue_longpoll),
-                    )
-                    .service(web::resource("/ws/{queue_name}/{uniq_id}").to(subscribe_queue_ws)),
-            ),
-    }
+#[macro_export]
+macro_rules! queue_scope_factory {
+    (   $create_queue:ident,
+        $send_to_queue:ident,
+        $close_queue:ident,
+        $subscribe_queue_longpoll:ident,
+        $subscribe_queue_ws:ident,
+        $service_token:expr
+    ) => {{
+        match $service_token {
+            None => web::scope("/queue")
+                .route("/create/{queue_name}", web::post().to($create_queue))
+                .route("/send/{queue_name}", web::post().to($send_to_queue))
+                .route("/close/{queue_name}", web::post().to($close_queue))
+                .service(
+                    web::scope("/listen")
+                        .route(
+                            "/longpoll/{queue_name}/{uniq_id}",
+                            web::get().to($subscribe_queue_longpoll),
+                        )
+                        .service(
+                            web::resource("/ws/{queue_name}/{uniq_id}").to($subscribe_queue_ws),
+                        ),
+                ),
+            Some(st) => web::scope("/queue")
+                .service(
+                    web::scope("")
+                        .guard($crate::api::service_token_guard(st.clone()))
+                        .route("/create/{queue_name}", web::post().to($create_queue))
+                        .route("/send/{queue_name}", web::post().to($send_to_queue))
+                        .route("/close/{queue_name}", web::post().to($close_queue))
+                        .service($crate::api::generate_jwt_method_factory(st.clone())),
+                )
+                .service(
+                    web::scope("/listen")
+                        .guard($crate::api::jwt_token_guard(st.clone()))
+                        .route(
+                            "/longpoll/{queue_name}/{uniq_id}",
+                            web::get().to($subscribe_queue_longpoll),
+                        )
+                        .service(
+                            web::resource("/ws/{queue_name}/{uniq_id}").to($subscribe_queue_ws),
+                        ),
+                ),
+        }
+    }};
 }
 
-fn service_token_guard(service_token: String) -> impl Guard {
+pub fn service_token_guard(service_token: String) -> impl Guard {
     let service_token_head_value = HeaderValue::from_str(&format!("{}{}", BEARER, service_token))
         .expect("invalid header value");
     actix_web::guard::fn_guard(move |head| {
@@ -83,7 +67,7 @@ fn service_token_guard(service_token: String) -> impl Guard {
     })
 }
 
-fn jwt_token_guard(service_token: String) -> impl Guard {
+pub fn jwt_token_guard(service_token: String) -> impl Guard {
     actix_web::guard::fn_guard(move |head| {
         head.headers
             .get("Authorization")
@@ -111,7 +95,7 @@ struct Claims {
     iss: String,
 }
 
-fn generate_jwt_method_factory(service_token: String) -> impl HttpServiceFactory {
+pub fn generate_jwt_method_factory(service_token: String) -> impl HttpServiceFactory {
     web::resource("/generate_jwt/{queue}/{uniq_id}")
         .data(service_token)
         .route(web::post().to(

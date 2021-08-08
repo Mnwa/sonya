@@ -11,8 +11,8 @@ use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, Responde
 use actix_web_actors::ws;
 use futures::TryStreamExt;
 use log::error;
-use web_queue_meta::api::queue_scope_factory;
 use web_queue_meta::message::EventMessage;
+use web_queue_meta::queue_scope_factory;
 use web_queue_meta::response::BaseQueueResponse;
 
 async fn subscribe_queue_ws(
@@ -209,13 +209,13 @@ async fn main() -> std::io::Result<()> {
         App::new()
             .wrap(Logger::default())
             .data(registry.clone())
-            .service(queue_scope_factory(
+            .service(queue_scope_factory!(
                 create_queue,
                 send_to_queue,
                 close_queue,
                 subscribe_queue_longpoll,
                 subscribe_queue_ws,
-                service_token.clone(),
+                service_token.clone()
             ))
     })
     .bind(address)?
