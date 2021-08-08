@@ -7,8 +7,8 @@ use tokio::sync::broadcast;
 use web_queue_meta::message::UniqId;
 
 pub struct QueueConnection<T> {
-    queue: Option<broadcast::Receiver<BroadcastMessage<T>>>,
     id: String,
+    queue: Option<broadcast::Receiver<BroadcastMessage<T>>>,
 }
 
 impl<T> QueueConnection<T> {
@@ -25,17 +25,15 @@ impl<T: 'static + Clone + Serialize + UniqId> Actor for QueueConnection<T> {
 
     fn started(&mut self, ctx: &mut Self::Context) {
         let mut queue = self.queue.take().expect("queue is none");
-        let id = self.id.clone();
-        info!("created connection for {}", id);
         let stream = async_stream::stream! {
              while let Ok(message) = queue.recv().await {
-                if message.is_valid(&id) {
-                    yield message
-                }
+                yield message
             }
         };
 
         ctx.add_stream(stream);
+
+        info!("created connection for {}", self.id);
     }
 
     fn stopped(&mut self, _ctx: &mut Self::Context) {
@@ -91,13 +89,4 @@ impl<T: 'static + Clone + Serialize + UniqId> StreamHandler<BroadcastMessage<T>>
 pub enum BroadcastMessage<T> {
     Message(T),
     Close,
-}
-
-impl<T: UniqId> BroadcastMessage<T> {
-    fn is_valid(&self, id: &String) -> bool {
-        match &self {
-            BroadcastMessage::Message(m) => m.get_id() == id,
-            BroadcastMessage::Close => true,
-        }
-    }
 }

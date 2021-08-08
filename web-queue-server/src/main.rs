@@ -18,7 +18,7 @@ async fn subscribe_queue_ws(
 ) -> Result<HttpResponse, Error> {
     let (queue_name, id) = info.into_inner();
     let guard = srv.read().await;
-    let queue_connection = guard.subscribe_queue(queue_name);
+    let queue_connection = guard.subscribe_queue(queue_name, id.clone()).await;
     match queue_connection {
         None => Err(actix_web::error::ErrorNotFound("queue not created")),
         Some(qc) => ws::start(QueueConnection::new(id, qc), &req, stream),
@@ -31,19 +31,16 @@ async fn subscribe_queue_longpoll(
 ) -> Result<HttpResponse, Error> {
     let (queue_name, id) = info.into_inner();
     let guard = srv.read().await;
-    let queue_connection = guard.subscribe_queue(queue_name);
+    let queue_connection = guard.subscribe_queue(queue_name, id).await;
     match queue_connection {
         None => Err(actix_web::error::ErrorNotFound("Queue not found")),
-        Some(mut qc) => loop {
+        Some(mut qc) => {
             let message = qc.recv().await;
             match message {
-                Ok(BroadcastMessage::Message(s)) if s.id == id => {
-                    return Ok(HttpResponse::Ok().json(s))
-                }
-                Ok(BroadcastMessage::Message(_)) => continue,
-                _ => return Err(actix_web::error::ErrorGone("Queue was closed")),
+                Ok(BroadcastMessage::Message(s)) => Ok(HttpResponse::Ok().json(s)),
+                _ => Err(actix_web::error::ErrorGone("Queue was closed")),
             }
-        },
+        }
     }
 }
 
@@ -51,8 +48,8 @@ async fn create_queue(srv: web::Data<RuntimeQueue>, info: web::Path<String>) -> 
     let queue_name = info.into_inner();
     let mut guard = srv.write().await;
     match guard.create_queue(queue_name) {
-        None => Err(actix_web::error::ErrorConflict("Queue already created")),
-        Some(_) => Ok(HttpResponse::Created().json(BaseQueueResponse { success: true })),
+        false => Err(actix_web::error::ErrorConflict("Queue already created")),
+        true => Ok(HttpResponse::Created().json(BaseQueueResponse { success: true })),
     }
 }
 
@@ -70,7 +67,7 @@ async fn send_to_queue(
             .expect("fail to get time")
             .as_secs() as usize,
     );
-    match guard.send_to_queue(queue_name, message) {
+    match guard.send_to_queue(queue_name, message).await {
         false => Err(actix_web::error::ErrorNotFound("Queue not found")),
         true => Ok(HttpResponse::Ok().json(BaseQueueResponse { success: true })),
     }
@@ -79,7 +76,7 @@ async fn send_to_queue(
 async fn close_queue(srv: web::Data<RuntimeQueue>, info: web::Path<String>) -> impl Responder {
     let queue_name = info.into_inner();
     let mut guard = srv.write().await;
-    match guard.close_queue(queue_name) {
+    match guard.close_queue(queue_name).await {
         false => Err(actix_web::error::ErrorNotFound("Queue not found")),
         true => Ok(HttpResponse::Ok().json(BaseQueueResponse { success: true })),
     }
