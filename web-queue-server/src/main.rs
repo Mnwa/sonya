@@ -87,8 +87,10 @@ async fn close_queue(srv: web::Data<RuntimeQueue>, info: web::Path<String>) -> i
 
 #[actix_web::main]
 async fn main() -> tokio::io::Result<()> {
-    let address = std::env::var("ADDR").unwrap_or_else(|_| String::from("0.0.0.0:8080"));
     env_logger::init();
+
+    let address = std::env::var("ADDR").unwrap_or_else(|_| String::from("0.0.0.0:8080"));
+    let service_token = std::env::var("SERVICE_TOKEN").ok();
 
     let queue = web::Data::new(RuntimeQueue::default());
     HttpServer::new(move || {
@@ -101,6 +103,7 @@ async fn main() -> tokio::io::Result<()> {
                 close_queue,
                 subscribe_queue_longpoll,
                 subscribe_queue_ws,
+                service_token.clone(),
             ))
     })
     .bind(address)?

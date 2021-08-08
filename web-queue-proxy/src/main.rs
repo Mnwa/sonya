@@ -191,14 +191,17 @@ async fn close_queue(req: HttpRequest, registry: web::Data<Addr<RegistryActor>>)
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    let address = std::env::var("ADDR").unwrap_or_else(|_| String::from("0.0.0.0:8081"));
     env_logger::init();
+
+    let address = std::env::var("ADDR").unwrap_or_else(|_| String::from("0.0.0.0:8081"));
 
     let shards = std::env::var("SHARDS")
         .expect("no one shard was not get from SHARDS env")
         .split(";")
         .map(String::from)
         .collect();
+
+    let service_token = std::env::var("SERVICE_TOKEN").ok();
 
     let registry = RegistryActor::new(shards);
 
@@ -212,6 +215,7 @@ async fn main() -> std::io::Result<()> {
                 close_queue,
                 subscribe_queue_longpoll,
                 subscribe_queue_ws,
+                service_token.clone(),
             ))
     })
     .bind(address)?
