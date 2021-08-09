@@ -7,14 +7,20 @@ use tokio::sync::broadcast;
 use web_queue_meta::message::UniqId;
 
 pub struct QueueConnection<T> {
-    id: String,
+    id: Option<String>,
+    queue_name: String,
     queue: Option<broadcast::Receiver<BroadcastMessage<T>>>,
 }
 
 impl<T> QueueConnection<T> {
-    pub fn new(id: String, queue: broadcast::Receiver<BroadcastMessage<T>>) -> Self {
+    pub fn new(
+        id: Option<String>,
+        queue_name: String,
+        queue: broadcast::Receiver<BroadcastMessage<T>>,
+    ) -> Self {
         Self {
             id,
+            queue_name,
             queue: Some(queue),
         }
     }
@@ -33,11 +39,19 @@ impl<T: 'static + Clone + Serialize + UniqId> Actor for QueueConnection<T> {
 
         ctx.add_stream(stream);
 
-        info!("created connection for {}", self.id);
+        info!(
+            "created connection for queue: {}, id: {}",
+            self.queue_name,
+            self.id.clone().unwrap_or_else(|| "none".to_owned())
+        );
     }
 
     fn stopped(&mut self, _ctx: &mut Self::Context) {
-        info!("closed connection for {}", self.id);
+        info!(
+            "closed connection for queue: {}, id: {}",
+            self.queue_name,
+            self.id.clone().unwrap_or_else(|| "none".to_owned())
+        );
     }
 }
 
@@ -66,11 +80,21 @@ impl<T: 'static + Clone + Serialize + UniqId> StreamHandler<BroadcastMessage<T>>
                 let serialized = serde_json::to_string(&m);
                 match serialized {
                     Ok(s) => {
-                        info!("accepted message for id {}: {}", self.id, s);
+                        info!(
+                            "accepted message for queue: {}, id: {}, message: {}",
+                            self.queue_name,
+                            self.id.clone().unwrap_or_else(|| "none".to_owned()),
+                            s
+                        );
                         ctx.text(s)
                     }
                     Err(err) => {
-                        error!("serialization error {}: {}", self.id, err);
+                        error!(
+                            "serialization error for queue: {}, id: {}, error: {}",
+                            self.queue_name,
+                            self.id.clone().unwrap_or_else(|| "none".to_owned()),
+                            err
+                        );
                         ctx.close(Some(CloseReason::from((CloseCode::Error, err.to_string()))));
                         ctx.stop()
                     }

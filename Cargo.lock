@@ -2138,6 +2138,7 @@ dependencies = [
  "actix",
  "actix-web",
  "actix-web-actors",
+ "async-stream",
  "env_logger",
  "futures",
  "log",

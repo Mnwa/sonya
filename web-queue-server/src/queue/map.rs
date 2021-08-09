@@ -7,8 +7,9 @@ use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
 use web_queue_meta::message::UniqId;
 
-type KeysMap<T> = Arc<RwLock<HashMap<String, broadcast::Sender<BroadcastMessage<T>>>>>;
-pub type QueueMap<T> = HashMap<String, KeysMap<T>>;
+type MessageSender<T> = broadcast::Sender<BroadcastMessage<T>>;
+type QueueIdMap<T> = Arc<RwLock<HashMap<String, MessageSender<T>>>>;
+pub type QueueMap<T> = HashMap<String, (MessageSender<T>, QueueIdMap<T>)>;
 
 #[derive(Debug)]
 pub struct Queue<T> {
@@ -23,17 +24,19 @@ impl<T: 'static + Clone + Serialize + UniqId> Queue<T> {
         }
 
         info!("queue {} successfully created", queue_name);
-        self.map.insert(queue_name, Default::default());
+        let (tx, _) = broadcast::channel(8);
+        self.map.insert(queue_name, (tx, Default::default()));
 
         true
     }
 
-    pub fn subscribe_queue(
+    pub fn subscribe_queue_by_id(
         &self,
         queue_name: String,
         id: String,
     ) -> impl Future<Output = Option<broadcast::Receiver<BroadcastMessage<T>>>> {
-        let guard: Option<KeysMap<T>> = self.map.get(&queue_name).map(Arc::clone);
+        let guard: Option<QueueIdMap<T>> =
+            self.map.get(&queue_name).map(|(_, m)| m).map(Arc::clone);
         async move {
             let guard = guard?;
             let queue = guard.read().await;
@@ -43,7 +46,7 @@ impl<T: 'static + Clone + Serialize + UniqId> Queue<T> {
             drop(queue);
 
             let mut queue = guard.write().await;
-            let (tx, rx) = broadcast::channel(128);
+            let (tx, rx) = broadcast::channel(8);
 
             queue.insert(id, tx);
 
@@ -51,22 +54,34 @@ impl<T: 'static + Clone + Serialize + UniqId> Queue<T> {
         }
     }
 
+    pub fn subscribe_queue(
+        &self,
+        queue_name: String,
+    ) -> Option<broadcast::Receiver<BroadcastMessage<T>>> {
+        let tx = self.map.get(&queue_name).map(|(tx, _)| tx);
+        Some(tx?.subscribe())
+    }
+
     pub fn send_to_queue(&self, queue_name: String, value: T) -> impl Future<Output = bool> {
-        let guard: Option<KeysMap<T>> = self.map.get(&queue_name).map(Arc::clone);
+        let queue = self
+            .map
+            .get(&queue_name)
+            .map(|(tx, m)| (tx.clone(), Arc::clone(m)));
         async move {
-            match guard {
+            match queue {
                 None => {
                     info!("queue {} was not created", queue_name);
                     false
                 }
-                Some(guard) => {
-                    let queue = guard.read().await;
-                    match queue.get(value.get_id()) {
-                        None => info!(
+                Some((tx, guard)) => {
+                    let queue_id_map = guard.read().await;
+                    match queue_id_map.get(value.get_id()) {
+                        None if tx.receiver_count() > 0 => info!(
                             "no one listeners for accepting message in queue {}",
                             queue_name
                         ),
-                        Some(tx) => match tx.send(BroadcastMessage::Message(value)) {
+                        None => info!("sent only to global queue {}", queue_name),
+                        Some(tx) => match tx.send(BroadcastMessage::Message(value.clone())) {
                             Ok(brokers) => info!(
                                 "message in queue {} accepted by {} brokers",
                                 queue_name, brokers
@@ -77,6 +92,7 @@ impl<T: 'static + Clone + Serialize + UniqId> Queue<T> {
                             ),
                         },
                     }
+                    let _ = tx.send(BroadcastMessage::Message(value));
                     true
                 }
             }
@@ -87,11 +103,13 @@ impl<T: 'static + Clone + Serialize + UniqId> Queue<T> {
         let guard = self.map.remove(&queue_name);
         async move {
             match guard {
-                Some(guard) => {
+                Some((tx, guard)) => {
                     let listeners = guard.read().await;
                     for (_, listener) in listeners.iter() {
                         let _ = listener.send(BroadcastMessage::Close);
                     }
+
+                    let _ = tx.send(BroadcastMessage::Close);
 
                     true
                 }

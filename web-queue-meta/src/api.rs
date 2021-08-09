@@ -6,15 +6,17 @@ use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation}
 use serde::{Deserialize, Serialize};
 use std::time::{Duration, SystemTime};
 
-const BEARER: &'static str = "Bearer ";
+const BEARER: &str = "Bearer ";
 
 #[macro_export]
 macro_rules! queue_scope_factory {
     (   $create_queue:ident,
         $send_to_queue:ident,
         $close_queue:ident,
-        $subscribe_queue_longpoll:ident,
+        $subscribe_queue_by_id_ws:ident,
+        $subscribe_queue_by_id_longpoll:ident,
         $subscribe_queue_ws:ident,
+        $subscribe_queue_longpoll:ident,
         $service_token:expr
     ) => {
         match $service_token {
@@ -25,11 +27,17 @@ macro_rules! queue_scope_factory {
                 .service(
                     web::scope("/listen")
                         .route(
-                            "/longpoll/{queue_name}/{uniq_id}",
+                            "/longpoll/{queue_name}",
                             web::get().to($subscribe_queue_longpoll),
                         )
+                        .service(web::resource("/ws/{queue_name}").to($subscribe_queue_ws))
+                        .route(
+                            "/longpoll/{queue_name}/{uniq_id}",
+                            web::get().to($subscribe_queue_by_id_longpoll),
+                        )
                         .service(
-                            web::resource("/ws/{queue_name}/{uniq_id}").to($subscribe_queue_ws),
+                            web::resource("/ws/{queue_name}/{uniq_id}")
+                                .to($subscribe_queue_by_id_ws),
                         ),
                 ),
             Some(st) => web::scope("/queue")
@@ -43,13 +51,26 @@ macro_rules! queue_scope_factory {
                 )
                 .service(
                     web::scope("/listen")
-                        .guard($crate::api::jwt_token_guard(st.clone()))
-                        .route(
-                            "/longpoll/{queue_name}/{uniq_id}",
-                            web::get().to($subscribe_queue_longpoll),
+                        .service(
+                            web::scope("")
+                                .guard($crate::api::service_token_guard(st.clone()))
+                                .route(
+                                    "/longpoll/{queue_name}",
+                                    web::get().to($subscribe_queue_longpoll),
+                                )
+                                .service(web::resource("/ws/{queue_name}").to($subscribe_queue_ws)),
                         )
                         .service(
-                            web::resource("/ws/{queue_name}/{uniq_id}").to($subscribe_queue_ws),
+                            web::scope("")
+                                .guard($crate::api::jwt_token_guard(st.clone()))
+                                .route(
+                                    "/longpoll/{queue_name}/{uniq_id}",
+                                    web::get().to($subscribe_queue_by_id_longpoll),
+                                )
+                                .service(
+                                    web::resource("/ws/{queue_name}/{uniq_id}")
+                                        .to($subscribe_queue_by_id_ws),
+                                ),
                         ),
                 ),
         }
@@ -83,6 +104,11 @@ pub fn jwt_token_guard(service_token: String) -> impl Guard {
                     &Validation::default(),
                 )
                 .ok()
+                .filter(|c| {
+                    head.uri
+                        .path()
+                        .ends_with(&format!("/{}/{}", c.claims.iss, c.claims.sub))
+                })
             })
             .is_some()
     })

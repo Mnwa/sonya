@@ -9,45 +9,27 @@ use actix_web::http::StatusCode;
 use actix_web::middleware::Logger;
 use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder, ResponseError};
 use actix_web_actors::ws;
-use futures::TryStreamExt;
+use futures::{FutureExt, TryStreamExt};
 use log::error;
 use web_queue_meta::message::EventMessage;
 use web_queue_meta::queue_scope_factory;
 use web_queue_meta::response::BaseQueueResponse;
 
-async fn subscribe_queue_ws(
+async fn subscribe_queue_by_id_ws(
     req: HttpRequest,
     stream: web::Payload,
     registry: web::Data<Addr<RegistryActor>>,
     info: web::Path<(String, String)>,
 ) -> Result<HttpResponse, Error> {
     let (queue_name, id) = info.into_inner();
-
-    let client = Client::default();
-
-    let address = get_address(registry.get_ref(), queue_name, id).await;
-
-    let mut request = client.ws(address.clone() + req.path());
-    for (key, value) in req.headers() {
-        request = request.set_header(key.clone(), value.clone());
-    }
-    let response = request.connect().await;
-
-    match response {
-        Ok((_r, s)) => ws::start(WebSocketProxyActor::new(s, address.clone()), &req, stream),
-        Err(e) => {
-            error!(
-                "subscribe queue web socket proxy error ({}): {:#?}",
-                address, e
-            );
-            Err(actix_web::error::ErrorGone(
-                "One of shards is not responding",
-            ))
-        }
-    }
+    ws::start(
+        WebSocketProxyActor::new(req.head(), registry.as_ref().clone(), queue_name, Some(id)),
+        &req,
+        stream,
+    )
 }
 
-async fn subscribe_queue_longpoll(
+async fn subscribe_queue_by_id_longpoll(
     req: HttpRequest,
     registry: web::Data<Addr<RegistryActor>>,
     info: web::Path<(String, String)>,
@@ -58,37 +40,79 @@ async fn subscribe_queue_longpoll(
 
     let address = get_address(registry.get_ref(), queue_name, id).await;
 
-    let response = client
+    let response_result = client
         .request_from(address.clone() + req.path(), req.head())
         .send()
+        .map(|r| (r, address))
         .await;
 
-    match response {
-        Ok(r) => {
-            let mut back_rsp = HttpResponse::build(r.status());
-            for (key, value) in r.headers() {
-                back_rsp.set_header(key.clone(), value.clone());
-            }
+    logpoll_response_factory!(response_result)
+}
 
-            let back_rsp = back_rsp.streaming(r.into_stream());
-            Ok(back_rsp)
+async fn subscribe_queue_ws(
+    req: HttpRequest,
+    stream: web::Payload,
+    registry: web::Data<Addr<RegistryActor>>,
+    info: web::Path<(String,)>,
+) -> Result<HttpResponse, Error> {
+    let queue_name = info.into_inner().0;
+    ws::start(
+        WebSocketProxyActor::new(req.head(), registry.as_ref().clone(), queue_name, None),
+        &req,
+        stream,
+    )
+}
+
+async fn subscribe_queue_longpoll(
+    req: HttpRequest,
+    registry: web::Data<Addr<RegistryActor>>,
+) -> Result<HttpResponse, Error> {
+    let client = Client::default();
+
+    let addresses = get_all_addresses(registry.get_ref()).await;
+
+    let requests = addresses.into_iter().map(|address| {
+        client
+            .request_from(address.clone() + req.path(), req.head())
+            .send()
+            .map(|r| (r, address))
+    });
+    let (response_result, _, _) = futures::future::select_all(requests).await;
+
+    logpoll_response_factory!(response_result)
+}
+
+#[macro_export]
+macro_rules! logpoll_response_factory {
+    ($response:ident) => {{
+        let (response, address) = $response;
+        match response {
+            Ok(r) => {
+                let mut back_rsp = HttpResponse::build(r.status());
+                for (key, value) in r.headers() {
+                    back_rsp.set_header(key.clone(), value.clone());
+                }
+
+                let back_rsp = back_rsp.streaming(r.into_stream());
+                Ok(back_rsp)
+            }
+            Err(err) if err.status_code() == StatusCode::NOT_FOUND => {
+                Err(actix_web::error::ErrorNotFound("Queue not found"))
+            }
+            Err(err) if err.status_code() == StatusCode::GONE => {
+                Err(actix_web::error::ErrorGone("Queue was closed"))
+            }
+            Err(e) => {
+                error!(
+                    "subscribe queue longpoll proxy error ({}): {:#?}",
+                    address, e
+                );
+                Err(actix_web::error::ErrorGone(
+                    "One of shards is not responding",
+                ))
+            }
         }
-        Err(err) if err.status_code() == StatusCode::NOT_FOUND => {
-            Err(actix_web::error::ErrorNotFound("Queue not found"))
-        }
-        Err(err) if err.status_code() == StatusCode::GONE => {
-            Err(actix_web::error::ErrorGone("Queue was closed"))
-        }
-        Err(e) => {
-            error!(
-                "subscribe queue longpoll proxy error ({}): {:#?}",
-                address, e
-            );
-            Err(actix_web::error::ErrorGone(
-                "One of shards is not responding",
-            ))
-        }
-    }
+    }};
 }
 
 async fn create_queue(
@@ -197,7 +221,7 @@ async fn main() -> std::io::Result<()> {
 
     let shards = std::env::var("SHARDS")
         .expect("no one shard was not get from SHARDS env")
-        .split(";")
+        .split(';')
         .map(String::from)
         .collect();
 
@@ -213,8 +237,10 @@ async fn main() -> std::io::Result<()> {
                 create_queue,
                 send_to_queue,
                 close_queue,
-                subscribe_queue_longpoll,
+                subscribe_queue_by_id_ws,
+                subscribe_queue_by_id_longpoll,
                 subscribe_queue_ws,
+                subscribe_queue_longpoll,
                 service_token.clone()
             ))
     })
