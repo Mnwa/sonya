@@ -7,7 +7,7 @@ use actix_web_actors::ws;
 use actix_web_actors::ws::{CloseCode, CloseReason, Frame, ProtocolError};
 use awc::error::WsClientError;
 use awc::Client;
-use futures::StreamExt;
+use futures::{Future, StreamExt};
 use log::{info, warn};
 use std::pin::Pin;
 use std::task::Poll;
@@ -86,7 +86,6 @@ impl Handler<ProxyRequest> for WebSocketProxyActor {
             }
             error => {
                 let address = ctx.address();
-                let attempts = self.attempts;
                 match error {
                     Err(e) => warn!(
                         "connect to shard error, queue: {}, id: {}, err: {:#?}",
@@ -102,13 +101,7 @@ impl Handler<ProxyRequest> for WebSocketProxyActor {
                     ),
                     _ => {}
                 }
-                ctx.spawn(
-                    async move {
-                        sleep(Duration::from_secs((attempts as f32).sqrt() as u64)).await;
-                        address.do_send(CreateConnection)
-                    }
-                    .into_actor(self),
-                );
+                address.do_send(CreateConnection);
             }
         }
     }
@@ -145,7 +138,6 @@ impl Handler<CreateConnection> for WebSocketProxyActor {
             ctx.stop();
             return;
         }
-        self.attempts += 1;
         info!(
             "create connection for queue: {}, id: {}, attempt: {}",
             self.queue_name,
@@ -158,6 +150,7 @@ impl Handler<CreateConnection> for WebSocketProxyActor {
                 self.uri.clone(),
                 self.headers.clone(),
                 ctx.address(),
+                self.attempts,
             )),
             Some(id) => ctx.add_message_stream(create_stream(
                 self.registry.clone(),
@@ -166,8 +159,11 @@ impl Handler<CreateConnection> for WebSocketProxyActor {
                 self.uri.clone(),
                 self.headers.clone(),
                 ctx.address(),
+                self.attempts,
             )),
         };
+
+        self.attempts += 1;
     }
 }
 
@@ -186,9 +182,12 @@ fn create_stream(
     uri: Uri,
     headers: HeaderMap,
     ws_actor: Addr<WebSocketProxyActor>,
+    attempt: u8,
 ) -> impl Stream<Item = ProxyRequest> {
     let client = Client::default();
     let stream = async_stream::try_stream! {
+        sleep_between_reconnects(attempt).await;
+
         let address = get_address(&registry, queue_name, id).await;
 
         let mut request = client.ws(address.clone() + uri.path());
@@ -201,6 +200,7 @@ fn create_stream(
         while let Some(c) = codec.next().await {
             yield c
         }
+
         ws_actor.do_send(CreateConnection);
     };
 
@@ -212,10 +212,13 @@ fn create_stream_all(
     uri: Uri,
     headers: HeaderMap,
     ws_actor: Addr<WebSocketProxyActor>,
+    attempt: u8,
 ) -> impl Stream<Item = ProxyRequest> {
     let client = Client::default();
 
     let stream = async_stream::try_stream! {
+        sleep_between_reconnects(attempt).await;
+
         let addresses = get_all_addresses(&registry).await;
 
         let requests = addresses.into_iter().map(|address| {
@@ -237,6 +240,7 @@ fn create_stream_all(
         while let Some(c) = stream.next().await {
             yield c
         }
+
         ws_actor.do_send(CreateConnection);
     };
 
@@ -270,4 +274,10 @@ impl<S: Stream<Item = O> + Unpin, O> Stream for ConnectionsAggregator<S> {
         }
         Poll::Pending
     }
+}
+
+/// Calculate sleep time with formula `seconds = 1.5 * sqrt(attempts)`
+/// To getting increasing time intervals between reconnections.
+fn sleep_between_reconnects(attempt: u8) -> impl Future<Output = ()> {
+    sleep(Duration::from_secs((1.5 * (attempt as f32)).sqrt() as u64))
 }
