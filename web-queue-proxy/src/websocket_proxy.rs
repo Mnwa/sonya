@@ -152,18 +152,20 @@ impl Handler<CreateConnection> for WebSocketProxyActor {
             self.id.clone().unwrap_or_else(|| "none".to_owned()),
             self.attempts
         );
-        match self.id.clone() {
+        match &self.id {
             None => ctx.add_message_stream(create_stream_all(
                 self.registry.clone(),
                 self.uri.clone(),
                 self.headers.clone(),
+                ctx.address(),
             )),
             Some(id) => ctx.add_message_stream(create_stream(
                 self.registry.clone(),
                 self.queue_name.clone(),
-                id,
+                id.clone(),
                 self.uri.clone(),
                 self.headers.clone(),
+                ctx.address(),
             )),
         };
     }
@@ -183,6 +185,7 @@ fn create_stream(
     id: String,
     uri: Uri,
     headers: HeaderMap,
+    ws_actor: Addr<WebSocketProxyActor>,
 ) -> impl Stream<Item = ProxyRequest> {
     let client = Client::default();
     let stream = async_stream::try_stream! {
@@ -198,6 +201,7 @@ fn create_stream(
         while let Some(c) = codec.next().await {
             yield c
         }
+        ws_actor.do_send(CreateConnection);
     };
 
     stream.map(ProxyRequest)
@@ -207,6 +211,7 @@ fn create_stream_all(
     registry: Addr<RegistryActor>,
     uri: Uri,
     headers: HeaderMap,
+    ws_actor: Addr<WebSocketProxyActor>,
 ) -> impl Stream<Item = ProxyRequest> {
     let client = Client::default();
 
@@ -227,43 +232,41 @@ fn create_stream_all(
             .collect();
         let connections = results?;
 
-        let mut stream = FlattenConcurrent::new(connections);
+        let mut stream = ConnectionsAggregator::new(connections);
 
         while let Some(c) = stream.next().await {
             yield c
         }
+        ws_actor.do_send(CreateConnection);
     };
 
     stream.map(ProxyRequest)
 }
 
-struct FlattenConcurrent<S> {
+struct ConnectionsAggregator<S> {
     streams: Vec<S>,
 }
 
-impl<S> FlattenConcurrent<S> {
+impl<S> ConnectionsAggregator<S> {
     fn new(streams: Vec<S>) -> Self {
         Self { streams }
     }
 }
 
-impl<S: Stream<Item = O> + Unpin, O> Stream for FlattenConcurrent<S> {
+impl<S: Stream<Item = O> + Unpin, O> Stream for ConnectionsAggregator<S> {
     type Item = O;
 
     fn poll_next(
         mut self: Pin<&mut Self>,
         cx: &mut std::task::Context<'_>,
     ) -> Poll<Option<Self::Item>> {
-        let mut empty_res_count = 0;
         for s in self.streams.iter_mut() {
             match s.poll_next_unpin(cx) {
                 Poll::Ready(Some(r)) => return Poll::Ready(Some(r)),
-                Poll::Ready(None) => empty_res_count += 1,
+                // if one of this connections is broken, close them all
+                Poll::Ready(None) => return Poll::Ready(None),
                 Poll::Pending => continue,
             }
-        }
-        if empty_res_count == self.streams.len() {
-            return Poll::Ready(None);
         }
         Poll::Pending
     }
