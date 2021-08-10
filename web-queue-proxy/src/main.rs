@@ -4,11 +4,11 @@ mod websocket_proxy;
 use crate::registry::{get_address, get_all_addresses, RegistryActor};
 use crate::websocket_proxy::WebSocketProxyActor;
 use actix::Addr;
-use actix_web::client::Client;
-use actix_web::http::StatusCode;
 use actix_web::middleware::Logger;
-use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder, ResponseError};
+use actix_web::web::Data;
+use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
 use actix_web_actors::ws;
+use awc::Client;
 use futures::{FutureExt, TryStreamExt};
 use log::error;
 use web_queue_meta::message::EventMessage;
@@ -90,17 +90,11 @@ macro_rules! logpoll_response_factory {
             Ok(r) => {
                 let mut back_rsp = HttpResponse::build(r.status());
                 for (key, value) in r.headers() {
-                    back_rsp.set_header(key.clone(), value.clone());
+                    back_rsp.insert_header((key.clone(), value.clone()));
                 }
 
                 let back_rsp = back_rsp.streaming(r.into_stream());
                 Ok(back_rsp)
-            }
-            Err(err) if err.status_code() == StatusCode::NOT_FOUND => {
-                Err(actix_web::error::ErrorNotFound("Queue not found"))
-            }
-            Err(err) if err.status_code() == StatusCode::GONE => {
-                Err(actix_web::error::ErrorGone("Queue was closed"))
             }
             Err(e) => {
                 error!(
@@ -134,9 +128,6 @@ async fn create_queue(
 
     match result {
         Ok(_) => Ok(HttpResponse::Ok().json(BaseQueueResponse { success: true })),
-        Err(err) if err.status_code() == StatusCode::CONFLICT => {
-            Err(actix_web::error::ErrorConflict("Queue already created"))
-        }
         Err(e) => {
             error!("create queue proxy error: {:#?}", e);
             Err(actix_web::error::ErrorGone(
@@ -167,14 +158,11 @@ async fn send_to_queue(
         Ok(r) => {
             let mut back_rsp = HttpResponse::build(r.status());
             for (key, value) in r.headers() {
-                back_rsp.set_header(key.clone(), value.clone());
+                back_rsp.insert_header((key.clone(), value.clone()));
             }
 
             let back_rsp = back_rsp.streaming(r.into_stream());
             Ok(back_rsp)
-        }
-        Err(err) if err.status_code() == StatusCode::NOT_FOUND => {
-            Err(actix_web::error::ErrorNotFound("Queue not found"))
         }
         Err(e) => {
             error!("send to queue proxy error ({}): {:#?}", address, e);
@@ -201,9 +189,6 @@ async fn close_queue(req: HttpRequest, registry: web::Data<Addr<RegistryActor>>)
 
     match result {
         Ok(_) => Ok(HttpResponse::Ok().json(BaseQueueResponse { success: true })),
-        Err(err) if err.status_code() == StatusCode::NOT_FOUND => {
-            Err(actix_web::error::ErrorNotFound("Queue not found"))
-        }
         Err(e) => {
             error!("closing queue proxy error: {:#?}", e);
             Err(actix_web::error::ErrorGone(
@@ -227,12 +212,12 @@ async fn main() -> std::io::Result<()> {
 
     let service_token = std::env::var("SERVICE_TOKEN").ok();
 
-    let registry = RegistryActor::new(shards);
+    let registry = Data::new(RegistryActor::new(shards));
 
     HttpServer::new(move || {
         App::new()
             .wrap(Logger::default())
-            .data(registry.clone())
+            .app_data(registry.clone())
             .service(queue_scope_factory!(
                 create_queue,
                 send_to_queue,

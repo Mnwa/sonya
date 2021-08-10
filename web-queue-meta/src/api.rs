@@ -1,6 +1,7 @@
 use actix_web::dev::HttpServiceFactory;
 use actix_web::guard::Guard;
 use actix_web::http::HeaderValue;
+use actix_web::web::Data;
 use actix_web::{web, HttpResponse};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
@@ -123,7 +124,7 @@ struct Claims {
 
 pub fn generate_jwt_method_factory(service_token: String) -> impl HttpServiceFactory {
     web::resource("/generate_jwt/{queue}/{uniq_id}")
-        .data(service_token)
+        .app_data(Data::new(service_token))
         .route(web::post().to(
             |service_token: web::Data<String>, info: web::Path<(String, String)>| async move {
                 let (queue_name, id) = info.into_inner();

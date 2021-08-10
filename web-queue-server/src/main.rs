@@ -126,8 +126,13 @@ async fn main() -> tokio::io::Result<()> {
 
     let address = std::env::var("ADDR").unwrap_or_else(|_| String::from("0.0.0.0:8080"));
     let service_token = std::env::var("SERVICE_TOKEN").ok();
+    let standard_queues: Vec<String> = std::env::var("QUEUES")
+        .unwrap_or_default()
+        .split(';')
+        .map(String::from)
+        .collect();
 
-    let queue = web::Data::new(RuntimeQueue::default());
+    let queue = web::Data::new(RuntimeQueue::new(Queue::from(standard_queues)));
     HttpServer::new(move || {
         App::new()
             .wrap(Logger::default())

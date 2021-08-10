@@ -122,6 +122,16 @@ impl<T: 'static + Clone + Serialize + UniqId> Queue<T> {
     }
 }
 
+impl<T: 'static + Clone + Serialize + UniqId> From<Vec<String>> for Queue<T> {
+    fn from(queue_names: Vec<String>) -> Self {
+        let mut queue = Self::default();
+        for queue_name in queue_names {
+            queue.create_queue(queue_name);
+        }
+        queue
+    }
+}
+
 impl<T> Default for Queue<T> {
     fn default() -> Self {
         Self {

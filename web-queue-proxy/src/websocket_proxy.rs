@@ -1,14 +1,17 @@
 use crate::registry::{get_address, get_all_addresses, RegistryActor};
+use actix::clock::sleep;
 use actix::prelude::*;
-use actix_web::client::{Client, WsClientError};
 use actix_web::dev::RequestHead;
 use actix_web::http::{HeaderMap, Uri};
 use actix_web_actors::ws;
 use actix_web_actors::ws::{CloseCode, CloseReason, Frame, ProtocolError};
+use awc::error::WsClientError;
+use awc::Client;
 use futures::StreamExt;
 use log::{info, warn};
 use std::pin::Pin;
 use std::task::Poll;
+use std::time::Duration;
 
 const MAX_RECONNECT_ATTEMPTS: u8 = 10;
 
@@ -51,13 +54,13 @@ impl Handler<ProxyRequest> for WebSocketProxyActor {
     type Result = ();
 
     fn handle(&mut self, ProxyRequest(frame): ProxyRequest, ctx: &mut Self::Context) {
-        info!(
-            "accepted new frame from shard queue: {}, id: {}",
-            self.queue_name,
-            self.id.clone().unwrap_or_else(|| "none".to_owned())
-        );
         match frame {
             Ok(Ok(f)) => {
+                info!(
+                    "accepted new frame from shard queue: {}, id: {}",
+                    self.queue_name,
+                    self.id.clone().unwrap_or_else(|| "none".to_owned())
+                );
                 self.attempts = 0;
                 match f {
                     Frame::Text(b) => ctx.text(
@@ -81,7 +84,32 @@ impl Handler<ProxyRequest> for WebSocketProxyActor {
                     }
                 }
             }
-            _ => ctx.address().do_send(CreateConnection),
+            error => {
+                let address = ctx.address();
+                let attempts = self.attempts;
+                match error {
+                    Err(e) => warn!(
+                        "connect to shard error, queue: {}, id: {}, err: {:#?}",
+                        self.queue_name,
+                        self.id.clone().unwrap_or_else(|| "none".to_owned()),
+                        e
+                    ),
+                    Ok(Err(e)) => warn!(
+                        "protocol to shard error, queue: {}, id: {}, err: {:#?}",
+                        self.queue_name,
+                        self.id.clone().unwrap_or_else(|| "none".to_owned()),
+                        e
+                    ),
+                    _ => {}
+                }
+                ctx.spawn(
+                    async move {
+                        sleep(Duration::from_secs((attempts as f32).sqrt() as u64)).await;
+                        address.do_send(CreateConnection)
+                    }
+                    .into_actor(self),
+                );
+            }
         }
     }
 }
@@ -115,6 +143,7 @@ impl Handler<CreateConnection> for WebSocketProxyActor {
             );
             ctx.close(Some(CloseReason::from(CloseCode::Error)));
             ctx.stop();
+            return;
         }
         self.attempts += 1;
         info!(
@@ -156,7 +185,6 @@ fn create_stream(
     headers: HeaderMap,
 ) -> impl Stream<Item = ProxyRequest> {
     let client = Client::default();
-
     let stream = async_stream::try_stream! {
         let address = get_address(&registry, queue_name, id).await;
 
@@ -187,7 +215,7 @@ fn create_stream_all(
 
         let requests = addresses.into_iter().map(|address| {
             let mut request = client.ws(address.clone() + uri.path());
-            for (key, value) in headers.into_iter() {
+            for (key, value) in headers.clone().into_iter() {
                 request = request.set_header(key, value.clone());
             }
            request.connect()
