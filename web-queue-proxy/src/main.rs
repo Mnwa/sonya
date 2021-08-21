@@ -1,15 +1,18 @@
 mod registry;
+mod service_discovery;
 mod websocket_proxy;
 
-use crate::registry::{get_address, get_all_addresses, RegistryActor};
+use crate::registry::{get_address, get_all_addresses, RegistryActor, RegistryList};
+use crate::service_discovery::api_factory::api_factory;
+use crate::service_discovery::ServiceDiscoveryActor;
 use crate::websocket_proxy::WebSocketProxyActor;
 use actix::Addr;
 use actix_web::middleware::Logger;
 use actix_web::web::Data;
-use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
+use actix_web::{post, web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
 use actix_web_actors::ws;
 use awc::Client;
-use futures::{FutureExt, TryStreamExt};
+use futures::{FutureExt, SinkExt, TryStreamExt};
 use log::error;
 use web_queue_meta::message::EventMessage;
 use web_queue_meta::queue_scope_factory;
@@ -19,11 +22,18 @@ async fn subscribe_queue_by_id_ws(
     req: HttpRequest,
     stream: web::Payload,
     registry: web::Data<Addr<RegistryActor>>,
+    service_discovery: web::Data<Addr<ServiceDiscoveryActor>>,
     info: web::Path<(String, String)>,
 ) -> Result<HttpResponse, Error> {
     let (queue_name, id) = info.into_inner();
     ws::start(
-        WebSocketProxyActor::new(req.head(), registry.as_ref().clone(), queue_name, Some(id)),
+        WebSocketProxyActor::new(
+            req.head(),
+            registry.as_ref().clone(),
+            service_discovery.as_ref().clone(),
+            queue_name,
+            Some(id),
+        ),
         &req,
         stream,
     )
@@ -53,11 +63,18 @@ async fn subscribe_queue_ws(
     req: HttpRequest,
     stream: web::Payload,
     registry: web::Data<Addr<RegistryActor>>,
+    service_discovery: web::Data<Addr<ServiceDiscoveryActor>>,
     info: web::Path<(String,)>,
 ) -> Result<HttpResponse, Error> {
     let queue_name = info.into_inner().0;
     ws::start(
-        WebSocketProxyActor::new(req.head(), registry.as_ref().clone(), queue_name, None),
+        WebSocketProxyActor::new(
+            req.head(),
+            registry.as_ref().clone(),
+            service_discovery.as_ref().clone(),
+            queue_name,
+            None,
+        ),
         &req,
         stream,
     )
@@ -213,11 +230,19 @@ async fn main() -> std::io::Result<()> {
     let service_token = std::env::var("SERVICE_TOKEN").ok();
 
     let registry = Data::new(RegistryActor::new(shards));
+    let (sender, factory) = api_factory();
+    let service_discovery = Data::new(ServiceDiscoveryActor::new(
+        factory,
+        registry.get_ref().clone(),
+    ));
+    let registry_updater = Data::new(RegistryUpdater(sender));
 
     HttpServer::new(move || {
         App::new()
             .wrap(Logger::default())
             .app_data(registry.clone())
+            .app_data(service_discovery.clone())
+            .app_data(registry_updater.clone())
             .service(queue_scope_factory!(
                 create_queue,
                 send_to_queue,
@@ -228,8 +253,26 @@ async fn main() -> std::io::Result<()> {
                 subscribe_queue_longpoll,
                 service_token.clone()
             ))
+            .service(service_registry_api)
     })
     .bind(address)?
     .run()
     .await
 }
+
+#[post("/registry")]
+async fn service_registry_api(
+    updater: web::Data<RegistryUpdater>,
+    list: web::Json<RegistryList>,
+) -> impl Responder {
+    let mut updater = RegistryUpdater::clone(&updater);
+    match updater.0.send(list.into_inner()).await {
+        Ok(_) => Ok("UPDATED"),
+        Err(_) => Err(actix_web::error::ErrorInternalServerError(
+            "Service discovery was broken",
+        )),
+    }
+}
+
+#[derive(Clone)]
+struct RegistryUpdater(futures::channel::mpsc::Sender<RegistryList>);

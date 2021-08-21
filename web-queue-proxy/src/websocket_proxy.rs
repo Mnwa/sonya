@@ -1,4 +1,5 @@
 use crate::registry::{get_address, get_all_addresses, RegistryActor};
+use crate::service_discovery::{reloading_stream_factory, ServiceDiscoveryActor};
 use actix::clock::sleep;
 use actix::prelude::*;
 use actix_web::dev::RequestHead;
@@ -19,6 +20,7 @@ pub struct WebSocketProxyActor {
     headers: HeaderMap,
     uri: Uri,
     registry: Addr<RegistryActor>,
+    service_discovery: Addr<ServiceDiscoveryActor>,
     queue_name: String,
     id: Option<String>,
     attempts: u8,
@@ -36,6 +38,7 @@ impl WebSocketProxyActor {
     pub fn new(
         headers: &RequestHead,
         registry: Addr<RegistryActor>,
+        service_discovery: Addr<ServiceDiscoveryActor>,
         queue_name: String,
         id: Option<String>,
     ) -> Self {
@@ -43,6 +46,7 @@ impl WebSocketProxyActor {
             headers: headers.headers().clone(),
             uri: headers.uri.clone(),
             registry,
+            service_discovery,
             queue_name,
             id,
             attempts: 0,
@@ -147,6 +151,7 @@ impl Handler<CreateConnection> for WebSocketProxyActor {
         match &self.id {
             None => ctx.add_message_stream(create_stream_all(
                 self.registry.clone(),
+                self.service_discovery.clone(),
                 self.uri.clone(),
                 self.headers.clone(),
                 ctx.address(),
@@ -154,6 +159,7 @@ impl Handler<CreateConnection> for WebSocketProxyActor {
             )),
             Some(id) => ctx.add_message_stream(create_stream(
                 self.registry.clone(),
+                self.service_discovery.clone(),
                 self.queue_name.clone(),
                 id.clone(),
                 self.uri.clone(),
@@ -177,6 +183,7 @@ struct CreateConnection;
 
 fn create_stream(
     registry: Addr<RegistryActor>,
+    service_discovery: Addr<ServiceDiscoveryActor>,
     queue_name: String,
     id: String,
     uri: Uri,
@@ -195,10 +202,12 @@ fn create_stream(
             request = request.set_header(key, value.clone());
         }
 
-        let (_, mut codec) = request.connect().await?;
+        let (_, codec) = request.connect().await?;
 
-        while let Some(c) = codec.next().await {
-            yield c
+        if let Some(mut s) = reloading_stream_factory(codec, service_discovery).await {
+            while let Some(c) = s.next().await {
+                yield c
+            }
         }
 
         ws_actor.do_send(CreateConnection);
@@ -209,6 +218,7 @@ fn create_stream(
 
 fn create_stream_all(
     registry: Addr<RegistryActor>,
+    service_discovery: Addr<ServiceDiscoveryActor>,
     uri: Uri,
     headers: HeaderMap,
     ws_actor: Addr<WebSocketProxyActor>,
@@ -235,10 +245,12 @@ fn create_stream_all(
             .collect();
         let connections = results?;
 
-        let mut stream = ConnectionsAggregator::new(connections);
+        let stream = ConnectionsAggregator::new(connections);
 
-        while let Some(c) = stream.next().await {
-            yield c
+        if let Some(mut s) = reloading_stream_factory(stream, service_discovery).await {
+            while let Some(c) = s.next().await {
+                yield c
+            }
         }
 
         ws_actor.do_send(CreateConnection);

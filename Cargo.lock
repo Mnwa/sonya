@@ -1958,6 +1958,8 @@ dependencies = [
  "futures",
  "log",
  "num_cpus",
+ "parking_lot",
+ "pin-project-lite",
  "serde",
  "serde_json",
  "web-queue-meta",
