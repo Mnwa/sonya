@@ -1,4 +1,12 @@
-pub mod api_factory;
+#[cfg(feature = "api")]
+mod api_factory;
+#[cfg(feature = "api")]
+pub use api_factory::api_factory;
+
+#[cfg(feature = "etcd")]
+mod etcd_factory;
+#[cfg(feature = "etcd")]
+pub use etcd_factory::etcd_factory;
 
 use crate::registry::{RegistryActor, RegistryList, UpdateRegistry};
 use actix::prelude::*;

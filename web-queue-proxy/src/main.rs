@@ -2,18 +2,26 @@ mod registry;
 mod service_discovery;
 mod websocket_proxy;
 
+#[cfg(feature = "api")]
+use crate::service_discovery::api_factory;
+#[cfg(feature = "api")]
+use actix_web::post;
+
+#[cfg(feature = "etcd")]
+use crate::service_discovery::etcd_factory;
+
 use crate::registry::{get_address, get_all_addresses, RegistryActor, RegistryList};
-use crate::service_discovery::api_factory::api_factory;
 use crate::service_discovery::ServiceDiscoveryActor;
 use crate::websocket_proxy::WebSocketProxyActor;
 use actix::Addr;
+use actix_web::http::Uri;
 use actix_web::middleware::Logger;
 use actix_web::web::Data;
-use actix_web::{post, web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
+use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
 use actix_web_actors::ws;
 use awc::Client;
 use futures::{FutureExt, SinkExt, TryStreamExt};
-use log::error;
+use log::{error, info};
 use web_queue_meta::message::EventMessage;
 use web_queue_meta::queue_scope_factory;
 use web_queue_meta::response::BaseQueueResponse;
@@ -221,28 +229,53 @@ async fn main() -> std::io::Result<()> {
 
     let address = std::env::var("ADDR").unwrap_or_else(|_| String::from("0.0.0.0:8081"));
 
-    let shards = std::env::var("SHARDS")
-        .expect("no one shard was not get from SHARDS env")
+    let shards = std::env::var("DEFAULT_SHARDS")
+        .unwrap_or_else(|_| "127.0.0.1:8080".into())
         .split(';')
         .map(String::from)
         .collect();
 
     let service_token = std::env::var("SERVICE_TOKEN").ok();
+    let service_discovery_backend = std::env::var("SERVICE_DISCOVERY_BACKEND").ok();
 
     let registry = Data::new(RegistryActor::new(shards));
-    let (sender, factory) = api_factory();
-    let service_discovery = Data::new(ServiceDiscoveryActor::new(
-        factory,
-        registry.get_ref().clone(),
-    ));
-    let registry_updater = Data::new(RegistryUpdater(sender));
+
+    #[cfg(feature = "api")]
+    let mut registry_api_updater: Option<Data<RegistryApiUpdater>> = None;
+
+    let service_discovery: Data<Addr<ServiceDiscoveryActor>> = match service_discovery_backend
+        .map(|s| Uri::from_maybe_shared(s).expect("invalid uri for service discovery backend"))
+    {
+        #[cfg(feature = "api")]
+        None => {
+            info!("chosen api service discovery");
+            let (sender, factory) = api_factory();
+            let service_discovery = Data::new(ServiceDiscoveryActor::new(
+                factory,
+                registry.get_ref().clone(),
+            ));
+            registry_api_updater = Some(Data::new(RegistryApiUpdater(sender)));
+            service_discovery
+        }
+        #[cfg(feature = "etcd")]
+        Some(backend) if backend.scheme_str() == Some("etcd") => {
+            info!("chosen etcd service discovery");
+            Data::new(ServiceDiscoveryActor::new(
+                etcd_factory(backend).await,
+                registry.get_ref().clone(),
+            ))
+        }
+        s => panic!(
+            "Invalid service discovery strategy accepted: {}",
+            s.unwrap()
+        ),
+    };
 
     HttpServer::new(move || {
-        App::new()
+        let mut app = App::new()
             .wrap(Logger::default())
             .app_data(registry.clone())
             .app_data(service_discovery.clone())
-            .app_data(registry_updater.clone())
             .service(queue_scope_factory!(
                 create_queue,
                 send_to_queue,
@@ -252,20 +285,26 @@ async fn main() -> std::io::Result<()> {
                 subscribe_queue_ws,
                 subscribe_queue_longpoll,
                 service_token.clone()
-            ))
-            .service(service_registry_api)
+            ));
+
+        #[cfg(feature = "api")]
+        if let Some(registry_updater) = registry_api_updater.clone() {
+            app = app.app_data(registry_updater).service(service_registry_api);
+        }
+        app
     })
     .bind(address)?
     .run()
     .await
 }
 
+#[cfg(feature = "api")]
 #[post("/registry")]
 async fn service_registry_api(
-    updater: web::Data<RegistryUpdater>,
+    updater: web::Data<RegistryApiUpdater>,
     list: web::Json<RegistryList>,
 ) -> impl Responder {
-    let mut updater = RegistryUpdater::clone(&updater);
+    let mut updater = RegistryApiUpdater::clone(&updater);
     match updater.0.send(list.into_inner()).await {
         Ok(_) => Ok("UPDATED"),
         Err(_) => Err(actix_web::error::ErrorInternalServerError(
@@ -275,4 +314,4 @@ async fn service_registry_api(
 }
 
 #[derive(Clone)]
-struct RegistryUpdater(futures::channel::mpsc::Sender<RegistryList>);
+struct RegistryApiUpdater(futures::channel::mpsc::Sender<RegistryList>);

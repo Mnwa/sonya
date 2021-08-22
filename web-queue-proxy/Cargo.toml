@@ -9,6 +9,11 @@ license = "MIT"
 keywords = ["web-queue", "proxy", "queue", "broadcast", "web"]
 categories = ["database", "database-implementations", "web-programming", "web-programming::websocket", "web-programming::http-server"]
 
+[features]
+default = ["etcd", "api"]
+etcd = ["etcd-client"]
+api = []
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
@@ -27,3 +32,4 @@ async-stream = "0.3"
 awc = "3.0.0-beta.7"
 parking_lot = "0.11"
 pin-project-lite = "0.2"
+etcd-client = { version = "0.7", optional = true }

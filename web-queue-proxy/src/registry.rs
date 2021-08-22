@@ -58,6 +58,10 @@ impl Handler<UpdateRegistry> for RegistryActor {
         UpdateRegistry(new_registry): UpdateRegistry,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
+        info!(
+            "updated registry, old: {:#?}, new: {:#?}",
+            self.registry, new_registry
+        );
         let mut registry = self.registry.write();
         *registry = new_registry;
         MessageResult(())
