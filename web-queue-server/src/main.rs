@@ -146,12 +146,12 @@ async fn main() -> tokio::io::Result<()> {
         #[cfg(feature = "etcd")]
         Some(backend) if backend.scheme_str() == Some("etcd") => {
             info!("chosen etcd service discovery");
-            service_discovery::etcd::register_instance(
+
+            actix::spawn(service_discovery::etcd::register_instance(
                 backend,
                 std::env::var("SERVICE_DISCOVERY_INSTANCE_ID").expect("invalid instance id"),
                 std::env::var("SERVICE_DISCOVERY_INSTANCE_ADDR").expect("invalid instance id"),
-            )
-            .await;
+            ));
         }
         s => panic!(
             "Invalid service discovery strategy accepted: {}",
