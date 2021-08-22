@@ -1,14 +1,17 @@
 use crate::queue::connection::{BroadcastMessage, QueueConnection};
 use crate::queue::map::Queue;
+use actix_web::http::Uri;
 use actix_web::middleware::Logger;
 use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
 use actix_web_actors::ws;
+use log::info;
 use std::time::{SystemTime, UNIX_EPOCH};
 use web_queue_meta::message::EventMessage;
 use web_queue_meta::queue_scope_factory;
 use web_queue_meta::response::BaseQueueResponse;
 
 pub mod queue;
+mod service_discovery;
 
 async fn subscribe_queue_by_id_ws(
     req: HttpRequest,
@@ -129,8 +132,32 @@ async fn main() -> tokio::io::Result<()> {
     let standard_queues: Vec<String> = std::env::var("QUEUES")
         .unwrap_or_default()
         .split(';')
+        .filter(|s| !s.is_empty())
         .map(String::from)
         .collect();
+
+    let service_discovery_backend = std::env::var("SERVICE_DISCOVERY_BACKEND").ok();
+
+    match service_discovery_backend
+        .map(|s| Uri::from_maybe_shared(s).expect("invalid uri for service discovery backend"))
+    {
+        #[cfg(feature = "api")]
+        None => {}
+        #[cfg(feature = "etcd")]
+        Some(backend) if backend.scheme_str() == Some("etcd") => {
+            info!("chosen etcd service discovery");
+            service_discovery::etcd::register_instance(
+                backend,
+                std::env::var("SERVICE_DISCOVERY_INSTANCE_ID").expect("invalid instance id"),
+                std::env::var("SERVICE_DISCOVERY_INSTANCE_ADDR").expect("invalid instance id"),
+            )
+            .await;
+        }
+        s => panic!(
+            "Invalid service discovery strategy accepted: {}",
+            s.unwrap()
+        ),
+    };
 
     let queue = web::Data::new(RuntimeQueue::new(Queue::from(standard_queues)));
     HttpServer::new(move || {

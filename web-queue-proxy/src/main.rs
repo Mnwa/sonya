@@ -2,22 +2,13 @@ mod registry;
 mod service_discovery;
 mod websocket_proxy;
 
-#[cfg(feature = "api")]
-use crate::service_discovery::api_factory;
-#[cfg(feature = "api")]
-use actix_web::post;
-
-#[cfg(feature = "etcd")]
-use crate::service_discovery::etcd_factory;
-
 use crate::registry::{get_address, get_all_addresses, RegistryActor, RegistryList};
 use crate::service_discovery::ServiceDiscoveryActor;
 use crate::websocket_proxy::WebSocketProxyActor;
 use actix::Addr;
 use actix_web::http::Uri;
 use actix_web::middleware::Logger;
-use actix_web::web::Data;
-use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
+use actix_web::{post, web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
 use actix_web_actors::ws;
 use awc::Client;
 use futures::{FutureExt, SinkExt, TryStreamExt};
@@ -230,38 +221,39 @@ async fn main() -> std::io::Result<()> {
     let address = std::env::var("ADDR").unwrap_or_else(|_| String::from("0.0.0.0:8081"));
 
     let shards = std::env::var("DEFAULT_SHARDS")
-        .unwrap_or_else(|_| "127.0.0.1:8080".into())
+        .unwrap_or_default()
         .split(';')
+        .filter(|s| !s.is_empty())
         .map(String::from)
         .collect();
 
     let service_token = std::env::var("SERVICE_TOKEN").ok();
     let service_discovery_backend = std::env::var("SERVICE_DISCOVERY_BACKEND").ok();
 
-    let registry = Data::new(RegistryActor::new(shards));
+    let registry = web::Data::new(RegistryActor::new(shards));
 
     #[cfg(feature = "api")]
-    let mut registry_api_updater: Option<Data<RegistryApiUpdater>> = None;
+    let mut registry_api_updater: Option<web::Data<RegistryApiUpdater>> = None;
 
-    let service_discovery: Data<Addr<ServiceDiscoveryActor>> = match service_discovery_backend
+    let service_discovery: web::Data<Addr<ServiceDiscoveryActor>> = match service_discovery_backend
         .map(|s| Uri::from_maybe_shared(s).expect("invalid uri for service discovery backend"))
     {
         #[cfg(feature = "api")]
         None => {
             info!("chosen api service discovery");
-            let (sender, factory) = api_factory();
-            let service_discovery = Data::new(ServiceDiscoveryActor::new(
+            let (sender, factory) = service_discovery::api::factory();
+            let service_discovery = web::Data::new(ServiceDiscoveryActor::new(
                 factory,
                 registry.get_ref().clone(),
             ));
-            registry_api_updater = Some(Data::new(RegistryApiUpdater(sender)));
+            registry_api_updater = Some(web::Data::new(RegistryApiUpdater(sender)));
             service_discovery
         }
         #[cfg(feature = "etcd")]
         Some(backend) if backend.scheme_str() == Some("etcd") => {
             info!("chosen etcd service discovery");
-            Data::new(ServiceDiscoveryActor::new(
-                etcd_factory(backend).await,
+            web::Data::new(ServiceDiscoveryActor::new(
+                service_discovery::etcd::factory(backend).await,
                 registry.get_ref().clone(),
             ))
         }

@@ -1,7 +1,7 @@
 use crate::registry::RegistryList;
 use futures::channel::mpsc;
 
-pub fn api_factory() -> (
+pub fn factory() -> (
     mpsc::Sender<RegistryList>,
     Box<dyn FnOnce() -> mpsc::Receiver<RegistryList>>,
 ) {

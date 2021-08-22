@@ -4,7 +4,7 @@ use etcd_client::*;
 use futures::stream::BoxStream;
 use std::collections::HashMap;
 
-pub async fn etcd_factory(uri: Uri) -> Box<dyn FnOnce() -> BoxStream<'static, RegistryList>> {
+pub async fn factory(uri: Uri) -> Box<dyn FnOnce() -> BoxStream<'static, RegistryList>> {
     let mut client = Client::connect(
         vec![format!(
             "{}:{}",
@@ -17,7 +17,10 @@ pub async fn etcd_factory(uri: Uri) -> Box<dyn FnOnce() -> BoxStream<'static, Re
     .expect("connection failed");
     let prefix = uri.path().trim_start_matches('/');
 
-    let resp = client.get(prefix, None).await.expect("error getting list");
+    let resp = client
+        .get(prefix, Some(GetOptions::new().with_prefix()))
+        .await
+        .expect("error getting list");
 
     let mut registry_list: HashMap<String, String> = resp
         .kvs()
@@ -31,7 +34,7 @@ pub async fn etcd_factory(uri: Uri) -> Box<dyn FnOnce() -> BoxStream<'static, Re
         .collect();
 
     let (_, mut stream) = client
-        .watch(prefix, None)
+        .watch(prefix, Some(WatchOptions::new().with_prefix()))
         .await
         .expect("failed prefix watching");
 

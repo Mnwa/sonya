@@ -2328,6 +2328,7 @@ dependencies = [
  "actix-web-actors",
  "async-stream",
  "env_logger",
+ "etcd-client",
  "log",
  "serde",
  "serde_json",

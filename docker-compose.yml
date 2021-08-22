@@ -21,6 +21,11 @@ services:
     environment:
       - RUST_LOG=info
       - QUEUES=test
+      - SERVICE_DISCOVERY_BACKEND=etcd://etcd-00/web_queue
+      - SERVICE_DISCOVERY_INSTANCE_ID=queue_server-1
+      - SERVICE_DISCOVERY_INSTANCE_ADDR=http://queue-1:8080
+    depends_on:
+      - etcd
   queue_server-2:
     hostname: queue-2
     build:
@@ -29,6 +34,11 @@ services:
     environment:
       - RUST_LOG=info
       - QUEUES=test
+      - SERVICE_DISCOVERY_BACKEND=etcd://etcd-00/web_queue
+      - SERVICE_DISCOVERY_INSTANCE_ID=queue_server-2
+      - SERVICE_DISCOVERY_INSTANCE_ADDR=http://queue-2:8080
+    depends_on:
+      - etcd
   queue_proxy:
     build:
       context: .
@@ -36,6 +46,8 @@ services:
     ports:
       - "8081:8081"
     environment:
-      - DEFAULT_SHARDS=http://queue-1:8080;http://queue-2:8080
+#      - DEFAULT_SHARDS=http://queue-1:8080;http://queue-2:8080
       - RUST_LOG=info
-#      - SERVICE_DISCOVERY_BACKEND=etcd://etcd-00/web_queue/queue_serve
+      - SERVICE_DISCOVERY_BACKEND=etcd://etcd-00/web_queue
+    depends_on:
+      - etcd
