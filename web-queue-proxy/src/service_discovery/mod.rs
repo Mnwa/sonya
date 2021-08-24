@@ -30,7 +30,7 @@ impl ServiceDiscoveryActor {
         T: 'static + Stream<Item = RegistryList>,
     {
         Self::create(|ctx| {
-            ctx.add_message_stream(factory().map(UpdateRegistry));
+            ctx.add_stream(factory().map(UpdateRegistry));
             Self {
                 registry,
                 broadcaster: Default::default(),
@@ -40,10 +40,8 @@ impl ServiceDiscoveryActor {
     }
 }
 
-impl Handler<UpdateRegistry> for ServiceDiscoveryActor {
-    type Result = MessageResult<UpdateRegistry>;
-
-    fn handle(&mut self, msg: UpdateRegistry, _ctx: &mut Self::Context) -> Self::Result {
+impl StreamHandler<UpdateRegistry> for ServiceDiscoveryActor {
+    fn handle(&mut self, msg: UpdateRegistry, _ctx: &mut Self::Context) {
         self.registry.do_send(msg);
         let broadcaster = std::mem::take(&mut self.broadcaster);
         broadcaster.state.store(true, Ordering::SeqCst);
@@ -52,7 +50,6 @@ impl Handler<UpdateRegistry> for ServiceDiscoveryActor {
             .lock()
             .iter()
             .for_each(|waiter| waiter.wake_by_ref());
-        MessageResult(())
     }
 }
 
