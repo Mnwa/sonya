@@ -27,4 +27,6 @@ async-stream = "0.3"
 env_logger = "0.9"
 log = "0.4"
 web-queue-meta = { version = "0.1", path = "../web-queue-meta" }
+uuid = { version = "0.8", features = ["v4"] }
+futures = "0.3"
 etcd-client = { version = "0.7", optional = true }

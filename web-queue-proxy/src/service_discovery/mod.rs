@@ -16,10 +16,15 @@ use std::task::{Poll, Waker};
 pub struct ServiceDiscoveryActor {
     registry: Addr<RegistryActor>,
     broadcaster: Arc<ServiceDiscoveryUpdateBroadcast>,
+    closer: Option<futures::channel::oneshot::Sender<()>>,
 }
 
 impl ServiceDiscoveryActor {
-    pub fn new<F, T>(factory: F, registry: Addr<RegistryActor>) -> Addr<Self>
+    pub fn new<F, T>(
+        factory: F,
+        registry: Addr<RegistryActor>,
+        closer: futures::channel::oneshot::Sender<()>,
+    ) -> Addr<Self>
     where
         F: FnOnce() -> T,
         T: 'static + Stream<Item = RegistryList>,
@@ -29,6 +34,7 @@ impl ServiceDiscoveryActor {
             Self {
                 registry,
                 broadcaster: Default::default(),
+                closer: Some(closer),
             }
         })
     }
@@ -39,7 +45,7 @@ impl Handler<UpdateRegistry> for ServiceDiscoveryActor {
 
     fn handle(&mut self, msg: UpdateRegistry, _ctx: &mut Self::Context) -> Self::Result {
         self.registry.do_send(msg);
-        let broadcaster = std::mem::replace(&mut self.broadcaster, Default::default());
+        let broadcaster = std::mem::take(&mut self.broadcaster);
         broadcaster.state.store(true, Ordering::SeqCst);
         broadcaster
             .waiters
@@ -60,6 +66,12 @@ impl Handler<SubscribeUpdates> for ServiceDiscoveryActor {
 
 impl Actor for ServiceDiscoveryActor {
     type Context = Context<Self>;
+
+    fn stopped(&mut self, _ctx: &mut Self::Context) {
+        if let Some(closer) = self.closer.take() {
+            let _ = closer.send(());
+        }
+    }
 }
 
 #[derive(Message)]

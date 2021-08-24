@@ -11,6 +11,7 @@ use actix_web::middleware::Logger;
 use actix_web::{post, web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
 use actix_web_actors::ws;
 use awc::Client;
+use futures::future::Either;
 use futures::{FutureExt, SinkExt, TryStreamExt};
 use log::{error, info};
 use web_queue_meta::message::EventMessage;
@@ -235,6 +236,8 @@ async fn main() -> std::io::Result<()> {
     #[cfg(feature = "api")]
     let mut registry_api_updater: Option<web::Data<RegistryApiUpdater>> = None;
 
+    let (cx, rx) = futures::channel::oneshot::channel();
+
     let service_discovery: web::Data<Addr<ServiceDiscoveryActor>> = match service_discovery_backend
         .map(|s| Uri::from_maybe_shared(s).expect("invalid uri for service discovery backend"))
     {
@@ -245,6 +248,7 @@ async fn main() -> std::io::Result<()> {
             let service_discovery = web::Data::new(ServiceDiscoveryActor::new(
                 factory,
                 registry.get_ref().clone(),
+                cx,
             ));
             registry_api_updater = Some(web::Data::new(RegistryApiUpdater(sender)));
             service_discovery
@@ -255,6 +259,7 @@ async fn main() -> std::io::Result<()> {
             web::Data::new(ServiceDiscoveryActor::new(
                 service_discovery::etcd::factory(backend).await,
                 registry.get_ref().clone(),
+                cx,
             ))
         }
         s => panic!(
@@ -263,31 +268,45 @@ async fn main() -> std::io::Result<()> {
         ),
     };
 
-    HttpServer::new(move || {
-        let mut app = App::new()
-            .wrap(Logger::default())
-            .app_data(registry.clone())
-            .app_data(service_discovery.clone())
-            .service(queue_scope_factory!(
-                create_queue,
-                send_to_queue,
-                close_queue,
-                subscribe_queue_by_id_ws,
-                subscribe_queue_by_id_longpoll,
-                subscribe_queue_ws,
-                subscribe_queue_longpoll,
-                service_token.clone()
-            ));
+    let result = futures::future::select(
+        rx,
+        HttpServer::new(move || {
+            let mut app = App::new()
+                .wrap(Logger::default())
+                .app_data(registry.clone())
+                .app_data(service_discovery.clone())
+                .service(queue_scope_factory!(
+                    create_queue,
+                    send_to_queue,
+                    close_queue,
+                    subscribe_queue_by_id_ws,
+                    subscribe_queue_by_id_longpoll,
+                    subscribe_queue_ws,
+                    subscribe_queue_longpoll,
+                    service_token.clone()
+                ));
 
-        #[cfg(feature = "api")]
-        if let Some(registry_updater) = registry_api_updater.clone() {
-            app = app.app_data(registry_updater).service(service_registry_api);
-        }
-        app
-    })
-    .bind(address)?
-    .run()
-    .await
+            #[cfg(feature = "api")]
+            if let Some(registry_updater) = registry_api_updater.clone() {
+                app = app.app_data(registry_updater).service(service_registry_api);
+            }
+            app
+        })
+        .bind(address)?
+        .run(),
+    )
+    .await;
+
+    match result {
+        Either::Left((l, _)) => match l {
+            Ok(_) => Err(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "service discovery is down",
+            )),
+            Err(e) => Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, e)),
+        },
+        Either::Right((r, _)) => r,
+    }
 }
 
 #[cfg(feature = "api")]

@@ -4,6 +4,8 @@ use actix_web::http::Uri;
 use actix_web::middleware::Logger;
 use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
 use actix_web_actors::ws;
+use futures::future::Either;
+use futures::FutureExt;
 use log::info;
 use std::time::{SystemTime, UNIX_EPOCH};
 use web_queue_meta::message::EventMessage;
@@ -138,6 +140,8 @@ async fn main() -> tokio::io::Result<()> {
 
     let service_discovery_backend = std::env::var("SERVICE_DISCOVERY_BACKEND").ok();
 
+    let (cx, rx) = futures::channel::oneshot::channel();
+
     match service_discovery_backend
         .map(|s| Uri::from_maybe_shared(s).expect("invalid uri for service discovery backend"))
     {
@@ -147,11 +151,16 @@ async fn main() -> tokio::io::Result<()> {
         Some(backend) if backend.scheme_str() == Some("etcd") => {
             info!("chosen etcd service discovery");
 
-            actix::spawn(service_discovery::etcd::register_instance(
-                backend,
-                std::env::var("SERVICE_DISCOVERY_INSTANCE_ID").expect("invalid instance id"),
-                std::env::var("SERVICE_DISCOVERY_INSTANCE_ADDR").expect("invalid instance id"),
-            ));
+            actix::spawn(
+                service_discovery::etcd::register_instance(
+                    backend,
+                    uuid::Uuid::new_v4().to_string(),
+                    std::env::var("SERVICE_DISCOVERY_INSTANCE_ADDR").expect("invalid instance id"),
+                )
+                .inspect(|_| {
+                    let _ = cx.send(());
+                }),
+            );
         }
         s => panic!(
             "Invalid service discovery strategy accepted: {}",
@@ -160,24 +169,39 @@ async fn main() -> tokio::io::Result<()> {
     };
 
     let queue = web::Data::new(RuntimeQueue::new(Queue::from(standard_queues)));
-    HttpServer::new(move || {
-        App::new()
-            .wrap(Logger::default())
-            .app_data(queue.clone())
-            .service(queue_scope_factory!(
-                create_queue,
-                send_to_queue,
-                close_queue,
-                subscribe_queue_by_id_ws,
-                subscribe_queue_by_id_longpoll,
-                subscribe_queue_ws,
-                subscribe_queue_longpoll,
-                service_token.clone()
-            ))
-    })
-    .bind(address)?
-    .run()
-    .await
+
+    let result = futures::future::select(
+        rx,
+        HttpServer::new(move || {
+            App::new()
+                .wrap(Logger::default())
+                .app_data(queue.clone())
+                .service(queue_scope_factory!(
+                    create_queue,
+                    send_to_queue,
+                    close_queue,
+                    subscribe_queue_by_id_ws,
+                    subscribe_queue_by_id_longpoll,
+                    subscribe_queue_ws,
+                    subscribe_queue_longpoll,
+                    service_token.clone()
+                ))
+        })
+        .bind(address)?
+        .run(),
+    )
+    .await;
+
+    match result {
+        Either::Left((l, _)) => match l {
+            Ok(_) => Err(std::io::Error::new(
+                std::io::ErrorKind::Interrupted,
+                "service discovery is down",
+            )),
+            Err(e) => Err(std::io::Error::new(std::io::ErrorKind::BrokenPipe, e)),
+        },
+        Either::Right((r, _)) => r,
+    }
 }
 
 type RuntimeQueue = tokio::sync::RwLock<Queue<EventMessage>>;
