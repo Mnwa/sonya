@@ -1,6 +1,5 @@
 use crate::registry::{get_address, get_all_addresses, RegistryActor};
 use crate::service_discovery::{reloading_stream_factory, ServiceDiscoveryActor};
-use actix::clock::sleep;
 use actix::prelude::*;
 use actix_web::dev::RequestHead;
 use actix_web::http::{HeaderMap, Uri};
@@ -8,13 +7,11 @@ use actix_web_actors::ws;
 use actix_web_actors::ws::{CloseCode, CloseReason, Frame, ProtocolError};
 use awc::error::WsClientError;
 use awc::Client;
-use futures::{Future, StreamExt};
+use futures::StreamExt;
 use log::{info, warn};
 use std::pin::Pin;
 use std::task::Poll;
-use std::time::Duration;
-
-const MAX_RECONNECT_ATTEMPTS: u8 = 10;
+use web_queue_meta::api::{sleep_between_reconnects, MAX_RECONNECT_ATTEMPTS};
 
 pub struct WebSocketProxyActor {
     headers: HeaderMap,
@@ -286,10 +283,4 @@ impl<S: Stream<Item = O> + Unpin, O> Stream for ConnectionsAggregator<S> {
         }
         Poll::Pending
     }
-}
-
-/// Calculate sleep time with formula `seconds = 1.5 * sqrt(attempts)`
-/// To getting increasing time intervals between reconnections.
-fn sleep_between_reconnects(attempt: u8) -> impl Future<Output = ()> {
-    sleep(Duration::from_secs((1.5 * (attempt as f32)).sqrt() as u64))
 }

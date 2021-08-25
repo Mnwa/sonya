@@ -1,10 +1,12 @@
 use actix_web::dev::HttpServiceFactory;
 use actix_web::guard::Guard;
 use actix_web::http::HeaderValue;
+use actix_web::rt::time::sleep;
 use actix_web::web::Data;
 use actix_web::{web, HttpResponse};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
 use serde::{Deserialize, Serialize};
+use std::future::Future;
 use std::time::{Duration, SystemTime};
 
 const BEARER: &str = "Bearer ";
@@ -162,4 +164,12 @@ pub fn generate_jwt_method_factory(service_token: String) -> impl HttpServiceFac
 struct JwtTokenResponse {
     token: String,
     expiration: usize,
+}
+
+pub const MAX_RECONNECT_ATTEMPTS: u8 = 10;
+
+/// Calculate sleep time with formula `seconds = 1.5 * sqrt(attempts)`
+/// To getting increasing time intervals between reconnections.
+pub fn sleep_between_reconnects(attempt: u8) -> impl Future<Output = ()> {
+    sleep(Duration::from_secs((1.5 * (attempt as f32)).sqrt() as u64))
 }

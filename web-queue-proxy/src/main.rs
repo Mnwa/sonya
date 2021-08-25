@@ -257,7 +257,7 @@ async fn main() -> std::io::Result<()> {
         Some(backend) if backend.scheme_str() == Some("etcd") => {
             info!("chosen etcd service discovery");
             web::Data::new(ServiceDiscoveryActor::new(
-                service_discovery::etcd::factory(backend).await,
+                service_discovery::etcd::factory(backend),
                 registry.get_ref().clone(),
                 cx,
             ))

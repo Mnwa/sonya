@@ -3,6 +3,7 @@ use actix_web::http::Uri;
 use etcd_client::{Client, PutOptions};
 use log::{error, info};
 use std::time::Duration;
+use web_queue_meta::api::{sleep_between_reconnects, MAX_RECONNECT_ATTEMPTS};
 
 const DEFAULT_TTL: i64 = 5;
 const DEFAULT_SLEEP: Duration = Duration::from_secs(2);
@@ -15,7 +16,7 @@ pub async fn register_instance(uri: Uri, instance_id: String, instance_addr: Str
 
     loop {
         // maximum attempts
-        if attempts == 10 {
+        if attempts == MAX_RECONNECT_ATTEMPTS {
             error!("registration in etcd failed more then 10 times");
             return;
         }
@@ -40,7 +41,7 @@ pub async fn register_instance(uri: Uri, instance_id: String, instance_addr: Str
             }
         }
 
-        sleep(DEFAULT_SLEEP).await;
+        sleep_between_reconnects(attempts).await
     }
 }
 

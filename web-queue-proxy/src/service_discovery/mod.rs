@@ -5,43 +5,47 @@ pub mod etcd;
 
 use crate::registry::{RegistryActor, RegistryList, UpdateRegistry};
 use actix::prelude::*;
+use futures::stream::BoxStream;
 use futures::{Future, StreamExt};
+use log::{error, info};
 use parking_lot::Mutex;
 use pin_project_lite::pin_project;
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::task::{Poll, Waker};
+use web_queue_meta::api::{sleep_between_reconnects, MAX_RECONNECT_ATTEMPTS};
+
+pub type ServiceDiscoveryStreamFactory = Box<dyn Fn() -> BoxStream<'static, RegistryList>>;
 
 pub struct ServiceDiscoveryActor {
     registry: Addr<RegistryActor>,
     broadcaster: Arc<ServiceDiscoveryUpdateBroadcast>,
     closer: Option<futures::channel::oneshot::Sender<()>>,
+    factory: ServiceDiscoveryStreamFactory,
+    attempts: u8,
 }
 
 impl ServiceDiscoveryActor {
-    pub fn new<F, T>(
-        factory: F,
+    pub fn new(
+        factory: ServiceDiscoveryStreamFactory,
         registry: Addr<RegistryActor>,
         closer: futures::channel::oneshot::Sender<()>,
-    ) -> Addr<Self>
-    where
-        F: FnOnce() -> T,
-        T: 'static + Stream<Item = RegistryList>,
-    {
-        Self::create(|ctx| {
-            ctx.add_stream(factory().map(UpdateRegistry));
-            Self {
-                registry,
-                broadcaster: Default::default(),
-                closer: Some(closer),
-            }
+    ) -> Addr<Self> {
+        Self::create(|_ctx| Self {
+            registry,
+            broadcaster: Default::default(),
+            closer: Some(closer),
+            factory,
+            attempts: 0,
         })
     }
 }
 
 impl StreamHandler<UpdateRegistry> for ServiceDiscoveryActor {
     fn handle(&mut self, msg: UpdateRegistry, _ctx: &mut Self::Context) {
+        self.attempts = 0;
+
         self.registry.do_send(msg);
         let broadcaster = std::mem::take(&mut self.broadcaster);
         broadcaster.state.store(true, Ordering::SeqCst);
@@ -50,6 +54,25 @@ impl StreamHandler<UpdateRegistry> for ServiceDiscoveryActor {
             .lock()
             .iter()
             .for_each(|waiter| waiter.wake_by_ref());
+    }
+
+    fn started(&mut self, _ctx: &mut Self::Context) {
+        info!(
+            "service discovery stream started< attempt: {}",
+            self.attempts
+        )
+    }
+
+    fn finished(&mut self, ctx: &mut Self::Context) {
+        error!(
+            "service discovery stream closed, attempt: {}",
+            self.attempts
+        );
+        if self.attempts == MAX_RECONNECT_ATTEMPTS {
+            return;
+        }
+        Actor::started(self, ctx);
+        self.attempts += 1;
     }
 }
 
@@ -63,6 +86,19 @@ impl Handler<SubscribeUpdates> for ServiceDiscoveryActor {
 
 impl Actor for ServiceDiscoveryActor {
     type Context = Context<Self>;
+
+    fn started(&mut self, ctx: &mut Self::Context) {
+        let factory = &mut self.factory;
+        let mut stream = factory();
+        let attempt = self.attempts;
+        ctx.add_stream(async_stream::stream! {
+            while let Some(r) = stream.next().await {
+                yield UpdateRegistry(r);
+            }
+
+            sleep_between_reconnects(attempt).await
+        });
+    }
 
     fn stopped(&mut self, _ctx: &mut Self::Context) {
         if let Some(closer) = self.closer.take() {
