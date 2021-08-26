@@ -138,22 +138,25 @@ async fn main() -> tokio::io::Result<()> {
         .map(String::from)
         .collect();
 
-    let service_discovery_backend = std::env::var("SERVICE_DISCOVERY_BACKEND").ok();
+    let service_discovery_type = std::env::var("SERVICE_DISCOVERY_TYPE").ok();
 
     let (cx, rx) = futures::channel::oneshot::channel();
 
-    match service_discovery_backend
-        .map(|s| Uri::from_maybe_shared(s).expect("invalid uri for service discovery backend"))
-    {
+    match service_discovery_type {
         #[cfg(feature = "api")]
         None => {}
         #[cfg(feature = "etcd")]
-        Some(backend) if backend.scheme_str() == Some("etcd") => {
+        Some(t) if t == "etcd" => {
             info!("chosen etcd service discovery");
 
             actix::spawn(
                 service_discovery::etcd::register_instance(
-                    backend,
+                    std::env::var("SERVICE_DISCOVERY_HOSTS")
+                        .expect("one or more etcd hosts expected")
+                        .split(';')
+                        .map(String::from)
+                        .collect(),
+                    std::env::var("SERVICE_DISCOVERY_PREFIX").unwrap_or_default(),
                     uuid::Uuid::new_v4().to_string(),
                     std::env::var("SERVICE_DISCOVERY_INSTANCE_ADDR").expect("invalid instance id"),
                 )
@@ -162,10 +165,7 @@ async fn main() -> tokio::io::Result<()> {
                 }),
             );
         }
-        s => panic!(
-            "Invalid service discovery strategy accepted: {}",
-            s.unwrap()
-        ),
+        t => panic!("Invalid service discovery type accepted: {}", t.unwrap()),
     };
 
     let queue = web::Data::new(RuntimeQueue::new(Queue::from(standard_queues)));

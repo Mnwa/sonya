@@ -1,19 +1,15 @@
 use crate::service_discovery::ServiceDiscoveryStreamFactory;
-use actix_web::http::Uri;
 use etcd_client::*;
 use log::error;
 use std::collections::HashMap;
 
-pub fn factory(uri: Uri) -> ServiceDiscoveryStreamFactory {
+pub fn factory(uris: Vec<String>, prefix: String) -> ServiceDiscoveryStreamFactory {
     Box::new(move || {
-        let uri = uri.clone();
+        let uris = uris.clone();
+        let prefix = prefix.clone();
         Box::pin(async_stream::stream! {
             let mut client = match Client::connect(
-                vec![format!(
-                    "{}:{}",
-                    uri.host().unwrap_or("127.0.0.1"),
-                    uri.port_u16().unwrap_or(2379)
-                )],
+                uris,
                 None,
             )
             .await {
@@ -23,10 +19,9 @@ pub fn factory(uri: Uri) -> ServiceDiscoveryStreamFactory {
                     return
                 }
             };
-            let prefix = uri.path().trim_start_matches('/');
 
             let resp = match client
-                .get(prefix, Some(GetOptions::new().with_prefix()))
+                .get(prefix.clone(), Some(GetOptions::new().with_prefix()))
                 .await {
                 Ok(c) => c,
                 Err(e) => {

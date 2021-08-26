@@ -1,5 +1,4 @@
 use actix::clock::sleep;
-use actix_web::http::Uri;
 use etcd_client::{Client, PutOptions};
 use log::{error, info};
 use std::time::Duration;
@@ -8,8 +7,13 @@ use web_queue_meta::api::{sleep_between_reconnects, MAX_RECONNECT_ATTEMPTS};
 const DEFAULT_TTL: i64 = 5;
 const DEFAULT_SLEEP: Duration = Duration::from_secs(2);
 
-pub async fn register_instance(uri: Uri, instance_id: String, instance_addr: String) {
-    let key = format!("{}/{}", uri.path().trim_start_matches('/'), instance_id);
+pub async fn register_instance(
+    uris: Vec<String>,
+    prefix: String,
+    instance_id: String,
+    instance_addr: String,
+) {
+    let key = format!("{}/{}", prefix, instance_id);
     let value = instance_addr;
 
     let mut attempts: u8 = 0;
@@ -20,15 +24,7 @@ pub async fn register_instance(uri: Uri, instance_id: String, instance_addr: Str
             error!("registration in etcd failed more then 10 times");
             return;
         }
-        let client_r = Client::connect(
-            vec![format!(
-                "{}:{}",
-                uri.host().unwrap_or("127.0.0.1"),
-                uri.port_u16().unwrap_or(2379)
-            )],
-            None,
-        )
-        .await;
+        let client_r = Client::connect(uris.clone(), None).await;
 
         match client_r {
             Ok(c) => {

@@ -6,7 +6,6 @@ use crate::registry::{get_address, get_all_addresses, RegistryActor, RegistryLis
 use crate::service_discovery::ServiceDiscoveryActor;
 use crate::websocket_proxy::WebSocketProxyActor;
 use actix::Addr;
-use actix_web::http::Uri;
 use actix_web::middleware::Logger;
 use actix_web::{post, web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
 use actix_web_actors::ws;
@@ -229,7 +228,7 @@ async fn main() -> std::io::Result<()> {
         .collect();
 
     let service_token = std::env::var("SERVICE_TOKEN").ok();
-    let service_discovery_backend = std::env::var("SERVICE_DISCOVERY_BACKEND").ok();
+    let service_discovery_type = std::env::var("SERVICE_DISCOVERY_TYPE").ok();
 
     let registry = web::Data::new(RegistryActor::new(shards));
 
@@ -238,9 +237,7 @@ async fn main() -> std::io::Result<()> {
 
     let (cx, rx) = futures::channel::oneshot::channel();
 
-    let service_discovery: web::Data<Addr<ServiceDiscoveryActor>> = match service_discovery_backend
-        .map(|s| Uri::from_maybe_shared(s).expect("invalid uri for service discovery backend"))
-    {
+    let service_discovery: web::Data<Addr<ServiceDiscoveryActor>> = match service_discovery_type {
         #[cfg(feature = "api")]
         None => {
             info!("chosen api service discovery");
@@ -254,18 +251,22 @@ async fn main() -> std::io::Result<()> {
             service_discovery
         }
         #[cfg(feature = "etcd")]
-        Some(backend) if backend.scheme_str() == Some("etcd") => {
+        Some(t) if t == "etcd" => {
             info!("chosen etcd service discovery");
             web::Data::new(ServiceDiscoveryActor::new(
-                service_discovery::etcd::factory(backend),
+                service_discovery::etcd::factory(
+                    std::env::var("SERVICE_DISCOVERY_HOSTS")
+                        .expect("one or more etcd hosts expected")
+                        .split(';')
+                        .map(String::from)
+                        .collect(),
+                    std::env::var("SERVICE_DISCOVERY_PREFIX").unwrap_or_default(),
+                ),
                 registry.get_ref().clone(),
                 cx,
             ))
         }
-        s => panic!(
-            "Invalid service discovery strategy accepted: {}",
-            s.unwrap()
-        ),
+        t => panic!("Invalid service discovery type accepted: {}", t.unwrap()),
     };
 
     let result = futures::future::select(
