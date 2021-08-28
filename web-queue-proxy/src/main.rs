@@ -16,6 +16,7 @@ use log::{error, info};
 use web_queue_meta::message::EventMessage;
 use web_queue_meta::queue_scope_factory;
 use web_queue_meta::response::BaseQueueResponse;
+use web_queue_meta::tls::get_options_from_env;
 
 async fn subscribe_queue_by_id_ws(
     req: HttpRequest,
@@ -269,33 +270,36 @@ async fn main() -> std::io::Result<()> {
         t => panic!("Invalid service discovery type accepted: {}", t.unwrap()),
     };
 
-    let result = futures::future::select(
-        rx,
-        HttpServer::new(move || {
-            let mut app = App::new()
-                .wrap(Logger::default())
-                .app_data(registry.clone())
-                .app_data(service_discovery.clone())
-                .service(queue_scope_factory!(
-                    create_queue,
-                    send_to_queue,
-                    close_queue,
-                    subscribe_queue_by_id_ws,
-                    subscribe_queue_by_id_longpoll,
-                    subscribe_queue_ws,
-                    subscribe_queue_longpoll,
-                    service_token.clone()
-                ));
+    let server = HttpServer::new(move || {
+        let mut app = App::new()
+            .wrap(Logger::default())
+            .app_data(registry.clone())
+            .app_data(service_discovery.clone())
+            .service(queue_scope_factory!(
+                create_queue,
+                send_to_queue,
+                close_queue,
+                subscribe_queue_by_id_ws,
+                subscribe_queue_by_id_longpoll,
+                subscribe_queue_ws,
+                subscribe_queue_longpoll,
+                service_token.clone()
+            ));
 
-            #[cfg(feature = "api")]
-            if let Some(registry_updater) = registry_api_updater.clone() {
-                app = app.app_data(registry_updater).service(service_registry_api);
-            }
-            app
-        })
-        .bind(address)?
-        .run(),
-    )
+        #[cfg(feature = "api")]
+        if let Some(registry_updater) = registry_api_updater.clone() {
+            app = app.app_data(registry_updater).service(service_registry_api);
+        }
+        app
+    });
+
+    let result = futures::future::select(rx, {
+        match get_options_from_env() {
+            None => server.bind(address)?,
+            Some(builder) => server.bind_openssl(address, builder)?,
+        }
+        .run()
+    })
     .await;
 
     match result {

@@ -1,6 +1,5 @@
 use crate::queue::connection::{BroadcastMessage, QueueConnection};
 use crate::queue::map::Queue;
-use actix_web::http::Uri;
 use actix_web::middleware::Logger;
 use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
 use actix_web_actors::ws;
@@ -11,6 +10,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use web_queue_meta::message::EventMessage;
 use web_queue_meta::queue_scope_factory;
 use web_queue_meta::response::BaseQueueResponse;
+use web_queue_meta::tls::get_options_from_env;
 
 pub mod queue;
 mod service_discovery;
@@ -170,26 +170,29 @@ async fn main() -> tokio::io::Result<()> {
 
     let queue = web::Data::new(RuntimeQueue::new(Queue::from(standard_queues)));
 
-    let result = futures::future::select(
-        rx,
-        HttpServer::new(move || {
-            App::new()
-                .wrap(Logger::default())
-                .app_data(queue.clone())
-                .service(queue_scope_factory!(
-                    create_queue,
-                    send_to_queue,
-                    close_queue,
-                    subscribe_queue_by_id_ws,
-                    subscribe_queue_by_id_longpoll,
-                    subscribe_queue_ws,
-                    subscribe_queue_longpoll,
-                    service_token.clone()
-                ))
-        })
-        .bind(address)?
-        .run(),
-    )
+    let server = HttpServer::new(move || {
+        App::new()
+            .wrap(Logger::default())
+            .app_data(queue.clone())
+            .service(queue_scope_factory!(
+                create_queue,
+                send_to_queue,
+                close_queue,
+                subscribe_queue_by_id_ws,
+                subscribe_queue_by_id_longpoll,
+                subscribe_queue_ws,
+                subscribe_queue_longpoll,
+                service_token.clone()
+            ))
+    });
+
+    let result = futures::future::select(rx, {
+        match get_options_from_env() {
+            None => server.bind(address)?,
+            Some(builder) => server.bind_openssl(address, builder)?,
+        }
+        .run()
+    })
     .await;
 
     match result {
