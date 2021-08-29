@@ -1,3 +1,5 @@
 /target
 .idea
 scratch.http
+config.yaml
+config.json

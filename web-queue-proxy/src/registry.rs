@@ -4,9 +4,10 @@ use parking_lot::RwLock;
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::sync::Arc;
+use web_queue_meta::config::Shards;
 
-pub type RegistryList = Vec<String>;
 type RegistryStore = Arc<RwLock<RegistryList>>;
+pub type RegistryList = Shards;
 
 pub struct RegistryActor {
     registry: RegistryStore,

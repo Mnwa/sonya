@@ -58,7 +58,7 @@ impl StreamHandler<UpdateRegistry> for ServiceDiscoveryActor {
 
     fn started(&mut self, _ctx: &mut Self::Context) {
         info!(
-            "service discovery stream started< attempt: {}",
+            "service discovery stream started attempt: {}",
             self.attempts
         )
     }

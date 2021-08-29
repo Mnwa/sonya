@@ -20,8 +20,8 @@ services:
       dockerfile: ./web-queue-server/Dockerfile
     environment:
       - RUST_LOG=info
-      - QUEUES=test
-      - SERVICE_DISCOVERY_TYPE=etcd
+      - QUEUE_DEFAULT=test
+      - SERVICE_DISCOVERY_TYPE=ETCD
       - SERVICE_DISCOVERY_HOSTS=http://etcd-00:2379
       - SERVICE_DISCOVERY_PREFIX=web_queue
       - SERVICE_DISCOVERY_INSTANCE_ADDR=http://queue-1:8080
@@ -34,8 +34,8 @@ services:
       dockerfile: ./web-queue-server/Dockerfile
     environment:
       - RUST_LOG=info
-      - QUEUES=test
-      - SERVICE_DISCOVERY_TYPE=etcd
+      - QUEUE_DEFAULT=test
+      - SERVICE_DISCOVERY_TYPE=ETCD
       - SERVICE_DISCOVERY_HOSTS=http://etcd-00:2379
       - SERVICE_DISCOVERY_PREFIX=web_queue
       - SERVICE_DISCOVERY_INSTANCE_ADDR=http://queue-2:8080
@@ -48,10 +48,10 @@ services:
     ports:
       - "8081:8081"
     environment:
-#      - DEFAULT_SHARDS=http://queue-1:8080;http://queue-2:8080
       - RUST_LOG=info
-      - SERVICE_DISCOVERY_TYPE=etcd
+      - SERVICE_DISCOVERY_TYPE=ETCD
       - SERVICE_DISCOVERY_HOSTS=http://etcd-00:2379
       - SERVICE_DISCOVERY_PREFIX=web_queue
+#      - SERVICE_DISCOVERY_DEFAULT_SHARDS=http://queue-1:8080;http://queue-2:8080
     depends_on:
       - etcd

@@ -6,11 +6,15 @@ use actix_web_actors::ws;
 use futures::future::Either;
 use futures::FutureExt;
 use log::info;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::time::{SystemTime, UNIX_EPOCH};
+use web_queue_meta::config::{
+    get_config, DefaultQueues, ServiceDiscovery, ServiceDiscoveryInstanceOptions,
+};
 use web_queue_meta::message::EventMessage;
 use web_queue_meta::queue_scope_factory;
 use web_queue_meta::response::BaseQueueResponse;
-use web_queue_meta::tls::get_options_from_env;
+use web_queue_meta::tls::get_options_from_config;
 
 pub mod queue;
 mod service_discovery;
@@ -127,44 +131,46 @@ async fn close_queue(srv: web::Data<RuntimeQueue>, info: web::Path<String>) -> i
 
 #[actix_web::main]
 async fn main() -> tokio::io::Result<()> {
-    env_logger::init();
+    let config = get_config();
 
-    let address = std::env::var("ADDR").unwrap_or_else(|_| String::from("0.0.0.0:8080"));
-    let service_token = std::env::var("SERVICE_TOKEN").ok();
-    let standard_queues: Vec<String> = std::env::var("QUEUES")
-        .unwrap_or_default()
-        .split(';')
-        .filter(|s| !s.is_empty())
-        .map(String::from)
-        .collect();
-
-    let service_discovery_type = std::env::var("SERVICE_DISCOVERY_TYPE").ok();
+    let address = config
+        .addr
+        .unwrap_or_else(|| SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 8080));
+    let service_token = config.secure.map(|s| s.service_token);
+    let standard_queues: DefaultQueues = config.queue.map(|q| q.default).unwrap_or_default();
 
     let (cx, rx) = futures::channel::oneshot::channel();
 
-    match service_discovery_type {
+    match config.service_discovery {
         #[cfg(feature = "api")]
-        None => {}
+        None | Some(ServiceDiscovery::Api { .. }) => {}
         #[cfg(feature = "etcd")]
-        Some(t) if t == "etcd" => {
+        Some(ServiceDiscovery::Etcd {
+            hosts,
+            prefix,
+            instance_opts,
+            ..
+        }) => {
             info!("chosen etcd service discovery");
+
+            let ServiceDiscoveryInstanceOptions {
+                instance_addr,
+                instance_id,
+            } = instance_opts.expect("expected instance addr in config");
 
             actix::spawn(
                 service_discovery::etcd::register_instance(
-                    std::env::var("SERVICE_DISCOVERY_HOSTS")
-                        .expect("one or more etcd hosts expected")
-                        .split(';')
-                        .map(String::from)
-                        .collect(),
-                    std::env::var("SERVICE_DISCOVERY_PREFIX").unwrap_or_default(),
-                    uuid::Uuid::new_v4().to_string(),
-                    std::env::var("SERVICE_DISCOVERY_INSTANCE_ADDR").expect("invalid instance id"),
+                    hosts,
+                    prefix.unwrap_or_default(),
+                    instance_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
+                    instance_addr,
                 )
                 .inspect(|_| {
                     let _ = cx.send(());
                 }),
             );
         }
+        #[cfg(not(feature = "api"))]
         t => panic!("Invalid service discovery type accepted: {}", t.unwrap()),
     };
 
@@ -187,9 +193,9 @@ async fn main() -> tokio::io::Result<()> {
     });
 
     let result = futures::future::select(rx, {
-        match get_options_from_env() {
+        match config.tls {
             None => server.bind(address)?,
-            Some(builder) => server.bind_openssl(address, builder)?,
+            Some(opts) => server.bind_openssl(address, get_options_from_config(opts))?,
         }
         .run()
     })

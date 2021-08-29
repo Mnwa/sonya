@@ -5,6 +5,7 @@ use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
+use web_queue_meta::config::DefaultQueues;
 use web_queue_meta::message::UniqId;
 
 type MessageSender<T> = broadcast::Sender<BroadcastMessage<T>>;
@@ -122,8 +123,8 @@ impl<T: 'static + Clone + Serialize + UniqId> Queue<T> {
     }
 }
 
-impl<T: 'static + Clone + Serialize + UniqId> From<Vec<String>> for Queue<T> {
-    fn from(queue_names: Vec<String>) -> Self {
+impl<T: 'static + Clone + Serialize + UniqId> From<DefaultQueues> for Queue<T> {
+    fn from(queue_names: DefaultQueues) -> Self {
         let mut queue = Self::default();
         for queue_name in queue_names {
             queue.create_queue(queue_name);

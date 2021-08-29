@@ -13,10 +13,13 @@ use awc::Client;
 use futures::future::Either;
 use futures::{FutureExt, SinkExt, TryStreamExt};
 use log::{error, info};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use web_queue_meta::api::service_token_guard;
+use web_queue_meta::config::{get_config, ServiceDiscovery};
 use web_queue_meta::message::EventMessage;
 use web_queue_meta::queue_scope_factory;
 use web_queue_meta::response::BaseQueueResponse;
-use web_queue_meta::tls::get_options_from_env;
+use web_queue_meta::tls::get_options_from_config;
 
 async fn subscribe_queue_by_id_ws(
     req: HttpRequest,
@@ -217,30 +220,32 @@ async fn close_queue(req: HttpRequest, registry: web::Data<Addr<RegistryActor>>)
 
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
-    env_logger::init();
+    let config = get_config();
 
-    let address = std::env::var("ADDR").unwrap_or_else(|_| String::from("0.0.0.0:8081"));
+    let address = config
+        .addr
+        .unwrap_or_else(|| SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 8081));
+    let service_token = config.secure.map(|s| s.service_token);
 
-    let shards = std::env::var("DEFAULT_SHARDS")
-        .unwrap_or_default()
-        .split(';')
-        .filter(|s| !s.is_empty())
-        .map(String::from)
-        .collect();
-
-    let service_token = std::env::var("SERVICE_TOKEN").ok();
-    let service_discovery_type = std::env::var("SERVICE_DISCOVERY_TYPE").ok();
-
-    let registry = web::Data::new(RegistryActor::new(shards));
+    let registry = web::Data::new(RegistryActor::new(
+        match &config.service_discovery {
+            #[cfg(feature = "api")]
+            Some(ServiceDiscovery::Api { default }) => default.clone(),
+            #[cfg(feature = "etcd")]
+            Some(ServiceDiscovery::Etcd { default, .. }) => default.clone(),
+            _ => None,
+        }
+        .unwrap_or_default(),
+    ));
 
     #[cfg(feature = "api")]
     let mut registry_api_updater: Option<web::Data<RegistryApiUpdater>> = None;
 
     let (cx, rx) = futures::channel::oneshot::channel();
 
-    let service_discovery: web::Data<Addr<ServiceDiscoveryActor>> = match service_discovery_type {
+    let service_discovery: web::Data<Addr<ServiceDiscoveryActor>> = match config.service_discovery {
         #[cfg(feature = "api")]
-        None => {
+        None | Some(ServiceDiscovery::Api { .. }) => {
             info!("chosen api service discovery");
             let (sender, factory) = service_discovery::api::factory();
             let service_discovery = web::Data::new(ServiceDiscoveryActor::new(
@@ -252,21 +257,15 @@ async fn main() -> std::io::Result<()> {
             service_discovery
         }
         #[cfg(feature = "etcd")]
-        Some(t) if t == "etcd" => {
+        Some(ServiceDiscovery::Etcd { hosts, prefix, .. }) => {
             info!("chosen etcd service discovery");
             web::Data::new(ServiceDiscoveryActor::new(
-                service_discovery::etcd::factory(
-                    std::env::var("SERVICE_DISCOVERY_HOSTS")
-                        .expect("one or more etcd hosts expected")
-                        .split(';')
-                        .map(String::from)
-                        .collect(),
-                    std::env::var("SERVICE_DISCOVERY_PREFIX").unwrap_or_default(),
-                ),
+                service_discovery::etcd::factory(hosts, prefix.unwrap_or_default()),
                 registry.get_ref().clone(),
                 cx,
             ))
         }
+        #[cfg(not(feature = "api"))]
         t => panic!("Invalid service discovery type accepted: {}", t.unwrap()),
     };
 
@@ -288,15 +287,22 @@ async fn main() -> std::io::Result<()> {
 
         #[cfg(feature = "api")]
         if let Some(registry_updater) = registry_api_updater.clone() {
-            app = app.app_data(registry_updater).service(service_registry_api);
+            app = match service_token.clone() {
+                None => app.app_data(registry_updater).service(service_registry_api),
+                Some(st) => app.app_data(registry_updater).service(
+                    web::scope("")
+                        .guard(service_token_guard(st))
+                        .service(service_registry_api),
+                ),
+            };
         }
         app
     });
 
     let result = futures::future::select(rx, {
-        match get_options_from_env() {
+        match config.tls {
             None => server.bind(address)?,
-            Some(builder) => server.bind_openssl(address, builder)?,
+            Some(opts) => server.bind_openssl(address, get_options_from_config(opts))?,
         }
         .run()
     })
