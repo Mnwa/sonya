@@ -1,6 +1,6 @@
 [package]
 name = "sonya"
-version = "0.1.1"
+version = "0.2.0"
 edition = "2018"
 description = "Backends for your web queue cluster"
 repository = "https://github.com/Mnwa/sonya"
@@ -25,7 +25,7 @@ serde_json = "1"
 tokio = { version = "1", features = ["sync"] }
 async-stream = "0.3"
 log = "0.4"
-sonya-meta = { version = "0.1", path = "../sonya-meta" }
+sonya-meta = { version = "0.2", path = "../sonya-meta" }
 uuid = { version = "0.8", features = ["v4"] }
 futures = "0.3"
 etcd-client = { version = "0.7", optional = true, features = ["tls"] }
