@@ -17,9 +17,9 @@ COPY . .
 COPY --from=cacher /usr/src/web-queue/target target
 COPY --from=cacher $CARGO_HOME $CARGO_HOME
 RUN apt update -y && apt -y install pkg-config libssl-dev
-RUN cargo build --release --bin web-queue-server
+RUN cargo build --release --bin sonya-proxy
 
 FROM debian:buster-slim
-COPY --from=builder /usr/src/web-queue/target/release/web-queue-server /usr/local/bin/web-queue-server
-RUN apt update -y && apt -y install libssl-dev
-CMD ["web-queue-server"]
+COPY --from=builder /usr/src/web-queue/target/release/sonya-proxy /usr/local/bin/sonya-proxy
+RUN apt update -y && apt -y install pkg-config libssl-dev
+CMD ["sonya-proxy"]

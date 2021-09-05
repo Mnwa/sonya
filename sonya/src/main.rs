@@ -6,15 +6,15 @@ use actix_web_actors::ws;
 use futures::future::Either;
 use futures::FutureExt;
 use log::info;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::time::{SystemTime, UNIX_EPOCH};
-use web_queue_meta::config::{
+use sonya_meta::config::{
     get_config, DefaultQueues, ServiceDiscovery, ServiceDiscoveryInstanceOptions,
 };
-use web_queue_meta::message::EventMessage;
-use web_queue_meta::queue_scope_factory;
-use web_queue_meta::response::BaseQueueResponse;
-use web_queue_meta::tls::get_options_from_config;
+use sonya_meta::message::EventMessage;
+use sonya_meta::queue_scope_factory;
+use sonya_meta::response::BaseQueueResponse;
+use sonya_meta::tls::get_options_from_config;
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 pub mod queue;
 mod service_discovery;
@@ -161,7 +161,7 @@ async fn main() -> tokio::io::Result<()> {
             actix::spawn(
                 service_discovery::etcd::register_instance(
                     hosts,
-                    prefix.unwrap_or_default(),
+                    prefix,
                     instance_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
                     instance_addr,
                 )

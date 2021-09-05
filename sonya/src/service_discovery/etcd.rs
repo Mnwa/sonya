@@ -1,9 +1,9 @@
 use actix::clock::sleep;
 use etcd_client::{Client, PutOptions};
 use log::{error, info};
+use sonya_meta::api::{sleep_between_reconnects, MAX_RECONNECT_ATTEMPTS};
+use sonya_meta::config::Shards;
 use std::time::Duration;
-use web_queue_meta::api::{sleep_between_reconnects, MAX_RECONNECT_ATTEMPTS};
-use web_queue_meta::config::Shards;
 
 const DEFAULT_TTL: i64 = 5;
 const DEFAULT_SLEEP: Duration = Duration::from_secs(2);

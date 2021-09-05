@@ -3,8 +3,8 @@ use actix_web_actors::ws;
 use actix_web_actors::ws::{CloseCode, CloseReason};
 use log::{error, info};
 use serde::Serialize;
+use sonya_meta::message::UniqId;
 use tokio::sync::broadcast;
-use web_queue_meta::message::UniqId;
 
 pub struct QueueConnection<T> {
     id: Option<String>,

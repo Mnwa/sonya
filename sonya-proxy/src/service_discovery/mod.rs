@@ -10,11 +10,11 @@ use futures::{Future, StreamExt};
 use log::{error, info};
 use parking_lot::Mutex;
 use pin_project_lite::pin_project;
+use sonya_meta::api::{sleep_between_reconnects, MAX_RECONNECT_ATTEMPTS};
 use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::task::{Poll, Waker};
-use web_queue_meta::api::{sleep_between_reconnects, MAX_RECONNECT_ATTEMPTS};
 
 pub type ServiceDiscoveryStreamFactory = Box<dyn Fn() -> BoxStream<'static, RegistryList>>;
 

@@ -1,12 +1,12 @@
 use crate::queue::connection::BroadcastMessage;
 use log::info;
 use serde::Serialize;
+use sonya_meta::config::DefaultQueues;
+use sonya_meta::message::UniqId;
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
 use tokio::sync::{broadcast, RwLock};
-use web_queue_meta::config::DefaultQueues;
-use web_queue_meta::message::UniqId;
 
 type MessageSender<T> = broadcast::Sender<BroadcastMessage<T>>;
 type QueueIdMap<T> = Arc<RwLock<HashMap<String, MessageSender<T>>>>;

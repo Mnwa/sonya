@@ -1893,6 +1893,60 @@ dependencies = [
 ]
 
 [[package]]
+name = "sonya"
+version = "0.1.1"
+dependencies = [
+ "actix",
+ "actix-web",
+ "actix-web-actors",
+ "async-stream",
+ "etcd-client",
+ "futures",
+ "log",
+ "serde",
+ "serde_json",
+ "sonya-meta",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
+name = "sonya-meta"
+version = "0.1.1"
+dependencies = [
+ "actix-web",
+ "env_logger",
+ "jsonwebtoken",
+ "openssl",
+ "serde",
+ "serde_json",
+ "serde_yaml",
+]
+
+[[package]]
+name = "sonya-proxy"
+version = "0.1.1"
+dependencies = [
+ "actix",
+ "actix-web",
+ "actix-web-actors",
+ "async-stream",
+ "awc",
+ "derive_more",
+ "etcd-client",
+ "futures",
+ "log",
+ "num_cpus",
+ "parking_lot",
+ "pin-project-lite",
+ "serde",
+ "serde_json",
+ "sonya-meta",
+ "tokio",
+ "ws",
+]
+
+[[package]]
 name = "spin"
 version = "0.5.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2423,60 +2477,6 @@ name = "wasm-bindgen-shared"
 version = "0.2.75"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2e0c4a743a309662d45f4ede961d7afa4ba4131a59a639f29b0069c3798bbcc2"
-
-[[package]]
-name = "web-queue-meta"
-version = "0.1.1"
-dependencies = [
- "actix-web",
- "env_logger",
- "jsonwebtoken",
- "openssl",
- "serde",
- "serde_json",
- "serde_yaml",
-]
-
-[[package]]
-name = "web-queue-proxy"
-version = "0.1.1"
-dependencies = [
- "actix",
- "actix-web",
- "actix-web-actors",
- "async-stream",
- "awc",
- "derive_more",
- "etcd-client",
- "futures",
- "log",
- "num_cpus",
- "parking_lot",
- "pin-project-lite",
- "serde",
- "serde_json",
- "tokio",
- "web-queue-meta",
- "ws",
-]
-
-[[package]]
-name = "web-queue-server"
-version = "0.1.1"
-dependencies = [
- "actix",
- "actix-web",
- "actix-web-actors",
- "async-stream",
- "etcd-client",
- "futures",
- "log",
- "serde",
- "serde_json",
- "tokio",
- "uuid",
- "web-queue-meta",
-]
 
 [[package]]
 name = "web-sys"

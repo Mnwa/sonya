@@ -40,21 +40,21 @@ publish_docker_package() {
 
   echo "Publishing on docker $PACKAGE, version = $VERSION..."
 
-  DOCKER_LATEST_TAG="mnwamnowich/web-queue:$TAG-latest"
-  DOCKER_VERSION_TAG="mnwamnowich/web-queue:$TAG-$VERSION"
+  DOCKER_LATEST_TAG="mnwamnowich/sonya:$TAG-latest"
+  DOCKER_VERSION_TAG="mnwamnowich/sonya:$TAG-$VERSION"
 
   docker build -t $DOCKER_LATEST_TAG -t $DOCKER_VERSION_TAG -f "$PACKAGE"/Dockerfile .
   docker push $DOCKER_VERSION_TAG
   docker push $DOCKER_LATEST_TAG
 }
 
-validate_crates_package "web-queue-meta" "$VERSION"
-validate_crates_package "web-queue-server" "$VERSION"
-validate_crates_package "web-queue-proxy" "$VERSION"
+validate_crates_package "sonya-meta" "$VERSION"
+validate_crates_package "sonya" "$VERSION"
+validate_crates_package "sonya-proxy" "$VERSION"
 
-publish_crates_package "web-queue-meta" "$VERSION"
-publish_crates_package "web-queue-server" "$VERSION"
-publish_crates_package "web-queue-proxy" "$VERSION"
+publish_crates_package "sonya-meta" "$VERSION"
+publish_crates_package "sonya" "$VERSION"
+publish_crates_package "sonya-proxy" "$VERSION"
 
-publish_docker_package "web-queue-server" "$VERSION" "backend"
-publish_docker_package "web-queue-proxy" "$VERSION" "proxy"
+publish_docker_package "sonya" "$VERSION" "queue"
+publish_docker_package "sonya-proxy" "$VERSION" "proxy"

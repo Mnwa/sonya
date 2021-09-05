@@ -1,9 +1,9 @@
 [package]
-name = "web-queue-proxy"
+name = "sonya-proxy"
 version = "0.1.1"
 edition = "2018"
 description = "Proxy for sharding queues of your web queue cluster"
-repository = "https://github.com/Mnwa/web-queue"
+repository = "https://github.com/Mnwa/sonya"
 readme = "../README.md"
 license = "MIT"
 keywords = ["web-queue", "proxy", "queue", "broadcast", "web"]
@@ -23,7 +23,7 @@ actix-web-actors = "4.0.0-beta.6"
 serde = "1"
 serde_json = "1"
 log = "0.4"
-web-queue-meta = { version = "0.1", path = "../web-queue-meta" }
+sonya-meta = { version = "0.1", path = "../sonya-meta" }
 num_cpus = "1"
 ws = "0.9"
 futures = "0.3"

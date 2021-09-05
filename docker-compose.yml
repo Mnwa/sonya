@@ -13,42 +13,40 @@ services:
       - --listen-peer-urls=http://0.0.0.0:2380
       - --initial-cluster-state=new
       - --initial-cluster-token=etcd-cluster-1
-  queue_server-1:
-    hostname: queue-1
+  sonya_server-1:
+    hostname: sonya-1
     build:
       context: .
-      dockerfile: ./web-queue-server/Dockerfile
+      dockerfile: sonya/Dockerfile
     environment:
       - RUST_LOG=info
       - QUEUE_DEFAULT=test
       - SERVICE_DISCOVERY_TYPE=ETCD
       - SERVICE_DISCOVERY_HOSTS=http://etcd-00:2379
-      - SERVICE_DISCOVERY_PREFIX=web_queue
-      - SERVICE_DISCOVERY_INSTANCE_ADDR=http://queue-1:8080
+      - SERVICE_DISCOVERY_INSTANCE_ADDR=http://sonya-1:8080
       - SECURE_SERVICE_TOKEN=dasdsadfaafwfwafwe
       - SECURE_JWT_EXPIRATION_TIME=315569520
     depends_on:
       - etcd
-  queue_server-2:
-    hostname: queue-2
+  sonya_server-2:
+    hostname: sonya-2
     build:
       context: .
-      dockerfile: ./web-queue-server/Dockerfile
+      dockerfile: sonya/Dockerfile
     environment:
       - RUST_LOG=info
       - QUEUE_DEFAULT=test
       - SERVICE_DISCOVERY_TYPE=ETCD
       - SERVICE_DISCOVERY_HOSTS=http://etcd-00:2379
-      - SERVICE_DISCOVERY_PREFIX=web_queue
-      - SERVICE_DISCOVERY_INSTANCE_ADDR=http://queue-2:8080
+      - SERVICE_DISCOVERY_INSTANCE_ADDR=http://sonya-2:8080
       - SECURE_SERVICE_TOKEN=dasdsadfaafwfwafwe
       - SECURE_JWT_EXPIRATION_TIME=315569520
     depends_on:
       - etcd
-  queue_proxy:
+  sonya_proxy:
     build:
       context: .
-      dockerfile: ./web-queue-proxy/Dockerfile
+      dockerfile: sonya-proxy/Dockerfile
     ports:
       - "8081:8081"
     environment:
@@ -56,9 +54,8 @@ services:
       - RUST_BACKTRACE=full
       - SERVICE_DISCOVERY_TYPE=ETCD
       - SERVICE_DISCOVERY_HOSTS=http://etcd-00:2379
-      - SERVICE_DISCOVERY_PREFIX=web_queue
       - SECURE_SERVICE_TOKEN=dasdsadfaafwfwafwe
       - SECURE_JWT_EXPIRATION_TIME=315569520
-#      - SERVICE_DISCOVERY_DEFAULT_SHARDS=http://queue-1:8080;http://queue-2:8080
+#      - SERVICE_DISCOVERY_DEFAULT_SHARDS=http://sonya-1:8080;http://sonya-2:8080
     depends_on:
       - etcd

@@ -8,13 +8,13 @@ use awc::Client;
 use derive_more::{Display, Error, From};
 use futures::StreamExt;
 use log::{error, info};
+use sonya_meta::api::{sleep_between_reconnects, MAX_RECONNECT_ATTEMPTS};
 use std::collections::HashMap;
 use std::pin::Pin;
 use std::sync::Arc;
 use std::task::Poll;
 use std::time::Duration;
 use tokio::sync::{broadcast, RwLock};
-use web_queue_meta::api::{sleep_between_reconnects, MAX_RECONNECT_ATTEMPTS};
 
 #[derive(Debug, Clone, Hash, PartialOrd, PartialEq, Eq)]
 pub struct WebSocketProxyClientsStorageKey(String, Option<String>);

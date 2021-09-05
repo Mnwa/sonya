@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "web-queue-server",
-    "web-queue-proxy",
-    "web-queue-meta"
+    "sonya",
+    "sonya-proxy",
+    "sonya-meta"
 ]

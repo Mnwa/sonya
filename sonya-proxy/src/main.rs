@@ -13,7 +13,7 @@ use actix::Addr;
 use actix_web::dev::RequestHead;
 use actix_web::http::HeaderMap;
 use actix_web::middleware::Logger;
-use actix_web::{post, web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
+use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
 use actix_web_actors::ws;
 use awc::http::{HeaderName, HeaderValue};
 use awc::ws::Frame;
@@ -21,15 +21,15 @@ use awc::Client;
 use futures::future::Either;
 use futures::{SinkExt, StreamExt, TryStreamExt};
 use log::{error, info};
+use sonya_meta::api::service_token_guard;
+use sonya_meta::config::{get_config, Config, ServiceDiscovery};
+use sonya_meta::message::EventMessage;
+use sonya_meta::queue_scope_factory;
+use sonya_meta::response::BaseQueueResponse;
+use sonya_meta::tls::get_options_from_config;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::Duration;
-use web_queue_meta::api::service_token_guard;
-use web_queue_meta::config::{get_config, Config, ServiceDiscovery};
-use web_queue_meta::message::EventMessage;
-use web_queue_meta::queue_scope_factory;
-use web_queue_meta::response::BaseQueueResponse;
-use web_queue_meta::tls::get_options_from_config;
 
 async fn subscribe_queue_by_id_ws(
     req: HttpRequest,
@@ -346,7 +346,7 @@ async fn main() -> std::io::Result<()> {
         Some(ServiceDiscovery::Etcd { hosts, prefix, .. }) => {
             info!("chosen etcd service discovery");
             web::Data::new(ServiceDiscoveryActor::new(
-                service_discovery::etcd::factory(hosts, prefix.unwrap_or_default()),
+                service_discovery::etcd::factory(hosts, prefix),
                 registry.get_ref().clone(),
                 cx,
             ))

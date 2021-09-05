@@ -31,7 +31,7 @@ use std::str::FromStr;
 /// SERVICE_DISCOVERY_TYPE=API // Possible service discovery types is API, ETCD
 /// SERVICE_DISCOVERY_HOSTS=http://etcd_host:port;http://etcd_host2:port // Hosts splits by ;, required by ETCD type
 /// SERVICE_DISCOVERY_DEFAULT_SHARDS=http://queue:port;http://queue2:port // Hosts splits by ;, required by ETCD type
-/// SERVICE_DISCOVERY_PREFIX=web_queue // Prefix for service discovery key
+/// SERVICE_DISCOVERY_PREFIX=sonya // Prefix for service discovery key
 /// SERVICE_DISCOVERY_INSTANCE_ADDR=http://queue:port // instance addr which will be registered in service discovery, required by server
 /// SERVICE_DISCOVERY_INSTANCE_id=123 // instance id which will be registered in service discovery
 /// WEBSOCKET_KEY=SGVsbG8sIHdvcmxkIQ== // Sec Web Socket header, proxy only
@@ -141,7 +141,8 @@ fn service_discovery_from_env() -> Result<Option<ServiceDiscovery>, std::env::Va
                 .filter(|s| !s.is_empty())
                 .map(String::from)
                 .collect(),
-            prefix: from_env_optional("SERVICE_DISCOVERY_PREFIX")?,
+            prefix: from_env_optional("SERVICE_DISCOVERY_PREFIX")?
+                .unwrap_or_else(default_sd_prefix),
             instance_opts: instance_opts_from_env()?,
         },
         _ => panic!("Invalid service discovery type"),
@@ -323,9 +324,14 @@ pub enum ServiceDiscovery {
     Etcd {
         default: Option<Shards>,
         hosts: ServiceDiscoveryHosts,
-        prefix: Option<String>,
+        #[serde(default = "default_sd_prefix")]
+        prefix: String,
         instance_opts: Option<ServiceDiscoveryInstanceOptions>,
     },
+}
+
+fn default_sd_prefix() -> String {
+    "sonya".into()
 }
 
 #[derive(Deserialize)]
@@ -338,7 +344,7 @@ enum ServiceDiscoveryDef {
     Etcd {
         default: Option<Shards>,
         hosts: ServiceDiscoveryHosts,
-        prefix: Option<String>,
+        prefix: String,
         instance_opts: Option<ServiceDiscoveryInstanceOptions>,
     },
 }
