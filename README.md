@@ -18,7 +18,7 @@
 
 Also, the service has a lot of options that can be configured from the environment, YAML, and JSON.
 
-#### [Configure documentation](https://github.com/Mnwa/sonya/documentation/configure.md)
+#### [Configure documentation](https://github.com/Mnwa/sonya/blob/master/documentation/configure.md)
 
 #### Env example
 ```env
@@ -44,7 +44,7 @@ addr: 0.0.0.0:8080
 ### Simple interface
 **sonya** provides a simple API that can be used from websites frontend, backends, etc.
 
-#### [API documentation](https://github.com/Mnwa/sonya/documentation/api.md)
+#### [API documentation](https://github.com/Mnwa/sonya/blob/master/documentation/api.md)
 
 #### Curl example subscribe
 > where `my_queue_name` and `my_id` are the queue name and id that you will listen to.
@@ -77,7 +77,7 @@ curl -X POST --location "http://localhost:8081/queue/send/my_queue_name" \
 ### Service mesh architecture and service discovery support
 **sonya** consists of two services that provide `service mesh` architecture support.
 
-#### [Sharding documentation](https://github.com/Mnwa/sonya/documentation/sharding.md)
+#### [Sharding documentation](https://github.com/Mnwa/sonya/blob/master/documentation/sharding.md)
 
 * **queue** - is the service that provides queue functionality and may be easily sharded.
 * **proxy** - is the service that will be balancing queues and ids between **queue** shards.
@@ -88,7 +88,7 @@ For registering **queue** services in **proxy**, you can use **proxy** api or `e
 
 ### Secure
 **sonya** provides the JWT and service token requests support.
-#### [Secure documentation](https://github.com/Mnwa/sonya/documentation/configure.md)
+#### [Secure documentation](https://github.com/Mnwa/sonya/blob/master/documentation/configure.md)
 
 ## Install and usage
 
