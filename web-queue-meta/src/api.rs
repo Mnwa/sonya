@@ -45,38 +45,42 @@ macro_rules! queue_scope_factory {
                         ),
                 ),
             Some(st) => web::scope("/queue")
-                .service(
-                    web::resource("/create/{queue_name}")
+                .route(
+                    "/create/{queue_name}",
+                    web::post()
                         .guard($crate::api::service_token_guard(st))
-                        .route(web::post().to($create_queue)),
+                        .to($create_queue),
                 )
-                .service(
-                    web::resource("/send/{queue_name}")
+                .route(
+                    "/send/{queue_name}",
+                    web::post()
                         .guard($crate::api::service_token_guard(st))
-                        .route(web::post().to($send_to_queue)),
+                        .to($send_to_queue),
                 )
-                .service(
-                    web::resource("/close/{queue_name}")
+                .route(
+                    "/close/{queue_name}",
+                    web::post()
                         .guard($crate::api::service_token_guard(st))
-                        .route(web::post().to($close_queue)),
+                        .to($close_queue),
                 )
-                .service($crate::api::generate_jwt_method_factory(st.clone()))
                 .service(
                     web::scope("/listen")
-                        .service(
-                            web::resource("/longpoll/{queue_name}")
+                        .route(
+                            "/longpoll/{queue_name}",
+                            web::get()
                                 .guard($crate::api::service_token_guard(st))
-                                .route(web::post().to($subscribe_queue_longpoll)),
+                                .to($subscribe_queue_longpoll),
                         )
                         .service(
                             web::resource("/ws/{queue_name}")
                                 .guard($crate::api::service_token_guard(st))
                                 .to($subscribe_queue_ws),
                         )
-                        .service(
-                            web::resource("/longpoll/{queue_name}/{uniq_id}")
+                        .route(
+                            "/longpoll/{queue_name}/{uniq_id}",
+                            web::get()
                                 .guard($crate::api::jwt_token_guard(st.clone()))
-                                .route(web::post().to($subscribe_queue_by_id_longpoll)),
+                                .to($subscribe_queue_by_id_longpoll),
                         )
                         .service(
                             web::resource("/ws/{queue_name}/{uniq_id}")

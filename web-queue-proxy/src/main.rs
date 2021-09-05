@@ -389,14 +389,16 @@ async fn main() -> std::io::Result<()> {
 
         #[cfg(feature = "api")]
         if let Some(registry_updater) = registry_api_updater.clone() {
-            app = match &secure {
-                None => app.app_data(registry_updater).service(service_registry_api),
-                Some(s) => app.app_data(registry_updater).service(
-                    web::scope("")
-                        .guard(service_token_guard(s))
-                        .service(service_registry_api),
-                ),
+            let route = match &secure {
+                None => web::post().to(service_registry_api),
+                Some(s) => web::post()
+                    .guard(service_token_guard(s))
+                    .to(service_registry_api),
             };
+
+            app = app
+                .app_data(registry_updater)
+                .service(web::resource("/registry").route(route));
         }
         app
     });
@@ -423,7 +425,6 @@ async fn main() -> std::io::Result<()> {
 }
 
 #[cfg(feature = "api")]
-#[post("/registry")]
 async fn service_registry_api(
     updater: web::Data<RegistryApiUpdater>,
     list: web::Json<RegistryList>,
