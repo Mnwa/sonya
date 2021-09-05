@@ -25,6 +25,8 @@ services:
       - SERVICE_DISCOVERY_HOSTS=http://etcd-00:2379
       - SERVICE_DISCOVERY_PREFIX=web_queue
       - SERVICE_DISCOVERY_INSTANCE_ADDR=http://queue-1:8080
+      - SECURE_SERVICE_TOKEN=dasdsadfaafwfwafwe
+      - SECURE_JWT_EXPIRATION_TIME=315569520
     depends_on:
       - etcd
   queue_server-2:
@@ -39,6 +41,8 @@ services:
       - SERVICE_DISCOVERY_HOSTS=http://etcd-00:2379
       - SERVICE_DISCOVERY_PREFIX=web_queue
       - SERVICE_DISCOVERY_INSTANCE_ADDR=http://queue-2:8080
+      - SECURE_SERVICE_TOKEN=dasdsadfaafwfwafwe
+      - SECURE_JWT_EXPIRATION_TIME=315569520
     depends_on:
       - etcd
   queue_proxy:
@@ -49,9 +53,12 @@ services:
       - "8081:8081"
     environment:
       - RUST_LOG=info
+      - RUST_BACKTRACE=full
       - SERVICE_DISCOVERY_TYPE=ETCD
       - SERVICE_DISCOVERY_HOSTS=http://etcd-00:2379
       - SERVICE_DISCOVERY_PREFIX=web_queue
+      - SECURE_SERVICE_TOKEN=dasdsadfaafwfwafwe
+      - SECURE_JWT_EXPIRATION_TIME=315569520
 #      - SERVICE_DISCOVERY_DEFAULT_SHARDS=http://queue-1:8080;http://queue-2:8080
     depends_on:
       - etcd

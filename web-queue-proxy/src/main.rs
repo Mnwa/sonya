@@ -1,21 +1,31 @@
 mod registry;
 mod service_discovery;
 mod websocket_proxy;
+mod websocket_proxy_client;
 
 use crate::registry::{get_address, get_all_addresses, RegistryActor, RegistryList};
 use crate::service_discovery::ServiceDiscoveryActor;
 use crate::websocket_proxy::WebSocketProxyActor;
+use crate::websocket_proxy_client::{
+    WebSocketActorResponse, WebSocketProxyClientsStorage, WebSocketProxyClientsStorageKey,
+};
 use actix::Addr;
+use actix_web::dev::RequestHead;
+use actix_web::http::HeaderMap;
 use actix_web::middleware::Logger;
 use actix_web::{post, web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
 use actix_web_actors::ws;
+use awc::http::{HeaderName, HeaderValue};
+use awc::ws::Frame;
 use awc::Client;
 use futures::future::Either;
-use futures::{FutureExt, SinkExt, TryStreamExt};
+use futures::{SinkExt, StreamExt, TryStreamExt};
 use log::{error, info};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::sync::Arc;
+use std::time::Duration;
 use web_queue_meta::api::service_token_guard;
-use web_queue_meta::config::{get_config, ServiceDiscovery};
+use web_queue_meta::config::{get_config, Config, ServiceDiscovery};
 use web_queue_meta::message::EventMessage;
 use web_queue_meta::queue_scope_factory;
 use web_queue_meta::response::BaseQueueResponse;
@@ -27,16 +37,23 @@ async fn subscribe_queue_by_id_ws(
     registry: web::Data<Addr<RegistryActor>>,
     service_discovery: web::Data<Addr<ServiceDiscoveryActor>>,
     info: web::Path<(String, String)>,
+    proxies_storage: web::Data<WebSocketProxyClientsStorage>,
+    config: web::Data<Config>,
 ) -> Result<HttpResponse, Error> {
     let (queue_name, id) = info.into_inner();
+    let receiver = create_receiver(
+        queue_name,
+        id.into(),
+        proxies_storage.as_ref(),
+        config.as_ref(),
+        req.head(),
+        registry.as_ref(),
+        service_discovery.as_ref(),
+    )
+    .await;
+
     ws::start(
-        WebSocketProxyActor::new(
-            req.head(),
-            registry.as_ref().clone(),
-            service_discovery.as_ref().clone(),
-            queue_name,
-            Some(id),
-        ),
+        WebSocketProxyActor::new(receiver, req.peer_addr().unwrap()),
         &req,
         stream,
     )
@@ -45,21 +62,24 @@ async fn subscribe_queue_by_id_ws(
 async fn subscribe_queue_by_id_longpoll(
     req: HttpRequest,
     registry: web::Data<Addr<RegistryActor>>,
+    service_discovery: web::Data<Addr<ServiceDiscoveryActor>>,
     info: web::Path<(String, String)>,
+    proxies_storage: web::Data<WebSocketProxyClientsStorage>,
+    config: web::Data<Config>,
 ) -> Result<HttpResponse, Error> {
     let (queue_name, id) = info.into_inner();
+    let receiver = create_receiver(
+        queue_name,
+        id.into(),
+        proxies_storage.as_ref(),
+        config.as_ref(),
+        req.head(),
+        registry.as_ref(),
+        service_discovery.as_ref(),
+    )
+    .await;
 
-    let client = Client::default();
-
-    let address = get_address(registry.get_ref(), queue_name, id).await;
-
-    let response_result = client
-        .request_from(address.clone() + req.path(), req.head())
-        .send()
-        .map(|r| (r, address))
-        .await;
-
-    logpoll_response_factory!(response_result)
+    logpoll_response_factory!(receiver)
 }
 
 async fn subscribe_queue_ws(
@@ -68,16 +88,23 @@ async fn subscribe_queue_ws(
     registry: web::Data<Addr<RegistryActor>>,
     service_discovery: web::Data<Addr<ServiceDiscoveryActor>>,
     info: web::Path<(String,)>,
+    proxies_storage: web::Data<WebSocketProxyClientsStorage>,
+    config: web::Data<Config>,
 ) -> Result<HttpResponse, Error> {
     let queue_name = info.into_inner().0;
+    let receiver = create_receiver(
+        queue_name,
+        None,
+        proxies_storage.as_ref(),
+        config.as_ref(),
+        req.head(),
+        registry.as_ref(),
+        service_discovery.as_ref(),
+    )
+    .await;
+
     ws::start(
-        WebSocketProxyActor::new(
-            req.head(),
-            registry.as_ref().clone(),
-            service_discovery.as_ref().clone(),
-            queue_name,
-            None,
-        ),
+        WebSocketProxyActor::new(receiver, req.peer_addr().unwrap()),
         &req,
         stream,
     )
@@ -86,45 +113,102 @@ async fn subscribe_queue_ws(
 async fn subscribe_queue_longpoll(
     req: HttpRequest,
     registry: web::Data<Addr<RegistryActor>>,
+    service_discovery: web::Data<Addr<ServiceDiscoveryActor>>,
+    info: web::Path<(String,)>,
+    proxies_storage: web::Data<WebSocketProxyClientsStorage>,
+    config: web::Data<Config>,
 ) -> Result<HttpResponse, Error> {
-    let client = Client::default();
+    let queue_name = info.into_inner().0;
+    let receiver = create_receiver(
+        queue_name,
+        None,
+        proxies_storage.as_ref(),
+        config.as_ref(),
+        req.head(),
+        registry.as_ref(),
+        service_discovery.as_ref(),
+    )
+    .await;
 
-    let addresses = get_all_addresses(registry.get_ref()).await;
+    logpoll_response_factory!(receiver)
+}
 
-    let requests = addresses.into_iter().map(|address| {
-        client
-            .request_from(address.clone() + req.path(), req.head())
-            .send()
-            .map(|r| (r, address))
-    });
-    let (response_result, _, _) = futures::future::select_all(requests).await;
+fn create_ws_header_map(config: &Config, r_headers: &RequestHead) -> HeaderMap {
+    let mut headers = HeaderMap::new();
+    headers.insert(
+        HeaderName::from_static("connection"),
+        HeaderValue::from_static("Upgrade"),
+    );
+    headers.insert(
+        HeaderName::from_static("upgrade"),
+        HeaderValue::from_static("websocket"),
+    );
+    headers.insert(
+        HeaderName::from_static("sec-websocket-version"),
+        HeaderValue::from_str(config.websocket.version.as_str())
+            .expect("invalid Sec-WebSocket-Version"),
+    );
+    headers.insert(
+        HeaderName::from_static("sec-websocket-key"),
+        HeaderValue::from_str(config.websocket.key.as_str()).expect("invalid Sec-WebSocket-Key"),
+    );
+    if let Some(token) = r_headers.headers.get("authorization") {
+        headers.insert(HeaderName::from_static("authorization"), token.clone());
+    }
+    headers
+}
 
-    logpoll_response_factory!(response_result)
+async fn create_receiver(
+    queue_name: String,
+    id: Option<String>,
+    proxies_storage: &WebSocketProxyClientsStorage,
+    config: &Config,
+    head: &RequestHead,
+    registry: &Addr<RegistryActor>,
+    service_discovery: &Addr<ServiceDiscoveryActor>,
+) -> Option<tokio::sync::broadcast::Receiver<WebSocketActorResponse>> {
+    proxies_storage
+        .subscribe(
+            WebSocketProxyClientsStorageKey::new(queue_name, id),
+            create_ws_header_map(config, head),
+            Addr::clone(registry),
+            Addr::clone(service_discovery),
+            config.garbage_collector.interval,
+        )
+        .await
 }
 
 #[macro_export]
 macro_rules! logpoll_response_factory {
-    ($response:ident) => {{
-        let (response, address) = $response;
-        match response {
-            Ok(r) => {
-                let mut back_rsp = HttpResponse::build(r.status());
-                for (key, value) in r.headers() {
-                    back_rsp.insert_header((key.clone(), value.clone()));
-                }
+    ($receiver:ident) => {{
+        let mut r = match $receiver {
+            Some(r) => r,
+            None => return Err(actix_web::error::ErrorGone("No one available connection")),
+        };
 
-                let back_rsp = back_rsp.streaming(r.into_stream());
-                Ok(back_rsp)
+        let stream = async_stream::stream! {
+            while let Ok(WebSocketActorResponse::Message(f)) = r.recv().await {
+                yield f
             }
-            Err(e) => {
-                error!(
-                    "subscribe queue longpoll proxy error ({}): {:#?}",
-                    address, e
-                );
-                Err(actix_web::error::ErrorGone(
-                    "One of shards is not responding",
-                ))
-            }
+        };
+
+        let response = stream
+            .filter_map(|f: Arc<Frame>| async move {
+                match f.as_ref() {
+                    Frame::Binary(b) => Some(b.clone()),
+                    Frame::Text(b) => Some(b.clone()),
+                    _ => None,
+                }
+            })
+            .boxed()
+            .next()
+            .await;
+
+        match response {
+            Some(b) => Ok(HttpResponse::Ok()
+                .content_type(HeaderValue::from_static("application/json"))
+                .body(b)),
+            None => Err(actix_web::error::ErrorGone("No one available connection")),
         }
     }};
 }
@@ -221,11 +305,13 @@ async fn close_queue(req: HttpRequest, registry: web::Data<Addr<RegistryActor>>)
 #[actix_web::main]
 async fn main() -> std::io::Result<()> {
     let config = get_config();
+    let shared_config = web::Data::new(config.clone());
 
     let address = config
         .addr
         .unwrap_or_else(|| SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 8081));
-    let service_token = config.secure.map(|s| s.service_token);
+
+    let secure = config.secure;
 
     let registry = web::Data::new(RegistryActor::new(
         match &config.service_discovery {
@@ -269,11 +355,27 @@ async fn main() -> std::io::Result<()> {
         t => panic!("Invalid service discovery type accepted: {}", t.unwrap()),
     };
 
+    let web_socket_proxies = web::Data::new(WebSocketProxyClientsStorage::default());
+    let wsp = web_socket_proxies.clone();
+
+    let garbage_interval = config.garbage_collector.interval;
+    actix::spawn(async move {
+        let mut interval = actix::clock::interval(Duration::from_secs(garbage_interval));
+
+        loop {
+            interval.tick().await;
+            wsp.clear().await;
+            info!("clearing websocket proxies storage")
+        }
+    });
+
     let server = HttpServer::new(move || {
         let mut app = App::new()
             .wrap(Logger::default())
             .app_data(registry.clone())
             .app_data(service_discovery.clone())
+            .app_data(web_socket_proxies.clone())
+            .app_data(shared_config.clone())
             .service(queue_scope_factory!(
                 create_queue,
                 send_to_queue,
@@ -282,16 +384,16 @@ async fn main() -> std::io::Result<()> {
                 subscribe_queue_by_id_longpoll,
                 subscribe_queue_ws,
                 subscribe_queue_longpoll,
-                service_token.clone()
+                &secure,
             ));
 
         #[cfg(feature = "api")]
         if let Some(registry_updater) = registry_api_updater.clone() {
-            app = match service_token.clone() {
+            app = match &secure {
                 None => app.app_data(registry_updater).service(service_registry_api),
-                Some(st) => app.app_data(registry_updater).service(
+                Some(s) => app.app_data(registry_updater).service(
                     web::scope("")
-                        .guard(service_token_guard(st))
+                        .guard(service_token_guard(s))
                         .service(service_registry_api),
                 ),
             };

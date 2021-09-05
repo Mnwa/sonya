@@ -32,3 +32,5 @@ awc = "3.0.0-beta.7"
 parking_lot = "0.11"
 pin-project-lite = "0.2"
 etcd-client = { version = "0.7", optional = true, features = ["tls"] }
+derive_more = "0.99"
+tokio = { version = "1", features = ["sync"] }

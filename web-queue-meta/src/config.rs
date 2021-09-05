@@ -26,13 +26,17 @@ use std::str::FromStr;
 /// TLS_PRIVATE_KEY=key.pem
 /// TLS_CERT=key.pem
 /// SECURE_SERVICE_TOKEN=xxx // Service token
-/// QUEUE_DEFAULT=test1;test // Default queues splits by ;
+/// SECURE_JWT_EXPIRATION_TIME=60 // Jwt expiration time
+/// QUEUE_DEFAULT=test1;test // Default queues splits by ;, queue server only
 /// SERVICE_DISCOVERY_TYPE=API // Possible service discovery types is API, ETCD
 /// SERVICE_DISCOVERY_HOSTS=http://etcd_host:port;http://etcd_host2:port // Hosts splits by ;, required by ETCD type
 /// SERVICE_DISCOVERY_DEFAULT_SHARDS=http://queue:port;http://queue2:port // Hosts splits by ;, required by ETCD type
 /// SERVICE_DISCOVERY_PREFIX=web_queue // Prefix for service discovery key
 /// SERVICE_DISCOVERY_INSTANCE_ADDR=http://queue:port // instance addr which will be registered in service discovery, required by server
 /// SERVICE_DISCOVERY_INSTANCE_id=123 // instance id which will be registered in service discovery
+/// WEBSOCKET_KEY=SGVsbG8sIHdvcmxkIQ== // Sec Web Socket header, proxy only
+/// WEBSOCKET_VERSION=13 // Web Socket version, proxy only
+/// GARBAGE_COLLECTOR_INTERVAL=60 // Time in seconds when proxy storage will be cleared, proxy only
 /// ```
 pub fn get_config() -> Config {
     env_logger::init();
@@ -55,6 +59,8 @@ fn from_env() -> Result<Config, std::env::VarError> {
         secure: secure_from_env()?,
         queue: queue_from_env()?,
         service_discovery: service_discovery_from_env()?,
+        websocket: websocket_from_env()?,
+        garbage_collector: garbage_collector_from_env()?,
     })
 }
 
@@ -71,9 +77,34 @@ fn tls_from_env() -> Result<Option<Tls>, std::env::VarError> {
 }
 
 fn secure_from_env() -> Result<Option<Secure>, std::env::VarError> {
-    let service_token =
-        from_env_optional("SECURE_SERVICE_TOKEN")?.map(|st| Secure { service_token: st });
+    let jwt_token_expiration = from_env_optional("SECURE_JWT_EXPIRATION_TIME")?
+        .map(|e| e.parse().expect("invalid jwt expiration time"))
+        .unwrap_or_else(default_jwt_token_expiration);
+    let service_token = from_env_optional("SECURE_SERVICE_TOKEN")?.map(|st| Secure {
+        service_token: st,
+        jwt_token_expiration,
+    });
     Ok(service_token)
+}
+
+fn garbage_collector_from_env() -> Result<GarbageCollector, std::env::VarError> {
+    let gb = from_env_optional("GARBAGE_COLLECTOR_INTERVAL")?
+        .map(|interval| GarbageCollector {
+            interval: interval.parse().expect("invalid garbage interval"),
+        })
+        .unwrap_or_default();
+    Ok(gb)
+}
+
+fn websocket_from_env() -> Result<WebSocket, std::env::VarError> {
+    let mut websocket = WebSocket::default();
+    if let Some(key) = from_env_optional("WEBSOCKET_KEY")? {
+        websocket.key = key;
+    }
+    if let Some(version) = from_env_optional("WEBSOCKET_VERSION")? {
+        websocket.version = version;
+    }
+    Ok(websocket)
 }
 
 fn queue_from_env() -> Result<Option<Queue>, std::env::VarError> {
@@ -178,6 +209,10 @@ pub struct Config {
     pub secure: Option<Secure>,
     pub queue: Option<Queue>,
     pub service_discovery: Option<ServiceDiscovery>,
+    #[serde(default)]
+    pub websocket: WebSocket,
+    #[serde(default)]
+    pub garbage_collector: GarbageCollector,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -189,19 +224,49 @@ pub struct Tls {
 #[derive(Serialize, Clone, Debug)]
 pub struct Secure {
     pub service_token: SecureToken,
+    pub jwt_token_expiration: u64,
 }
 
 #[derive(Deserialize)]
 #[serde(remote = "Secure")]
 struct SecureDef {
     pub service_token: SecureToken,
+    #[serde(default = "default_jwt_token_expiration")]
+    pub jwt_token_expiration: u64,
+}
+
+pub fn default_jwt_token_expiration() -> u64 {
+    60
 }
 
 pub type SecureToken = String;
 
 impl From<SecureToken> for Secure {
     fn from(service_token: SecureToken) -> Self {
-        Self { service_token }
+        Self {
+            service_token,
+            jwt_token_expiration: default_jwt_token_expiration(),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug)]
+pub struct WebSocket {
+    pub key: String,
+    #[serde(default = "default_websocket_v")]
+    pub version: String,
+}
+
+fn default_websocket_v() -> String {
+    "13".into()
+}
+
+impl Default for WebSocket {
+    fn default() -> Self {
+        Self {
+            key: "SGVsbG8sIHdvcmxkIQ==".into(),
+            version: default_websocket_v(),
+        }
     }
 }
 
@@ -216,11 +281,34 @@ struct QueueDef {
     pub default: DefaultQueues,
 }
 
-pub type DefaultQueues = Vec<String>;
-
 impl From<DefaultQueues> for Queue {
     fn from(default: DefaultQueues) -> Self {
         Self { default }
+    }
+}
+
+pub type DefaultQueues = Vec<String>;
+
+#[derive(Serialize, Clone, Debug)]
+pub struct GarbageCollector {
+    pub interval: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "GarbageCollector")]
+struct GarbageCollectorDef {
+    pub interval: u64,
+}
+
+impl From<u64> for GarbageCollector {
+    fn from(interval: u64) -> Self {
+        Self { interval }
+    }
+}
+
+impl Default for GarbageCollector {
+    fn default() -> Self {
+        Self::from(60)
     }
 }
 
@@ -284,35 +372,9 @@ impl From<Shards> for ServiceDiscovery {
 
 pub type ServiceDiscoveryHosts = Vec<String>;
 
-impl<'de> Deserialize<'de> for Secure {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_any(StringOrStruct::<Self>(PhantomData))
-    }
-}
-
-impl<'de> Deserialize<'de> for Queue {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_any(VecOrStruct::<Self>(PhantomData))
-    }
-}
-
-impl<'de> Deserialize<'de> for ServiceDiscovery {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: Deserializer<'de>,
-    {
-        deserializer.deserialize_any(VecOrStruct::<Self>(PhantomData))
-    }
-}
-
 struct StringOrStruct<T>(PhantomData<T>);
 struct VecOrStruct<T>(PhantomData<T>);
+struct U64OrStruct<T>(PhantomData<T>);
 
 #[macro_export]
 macro_rules! string_or_struct_impl {
@@ -340,6 +402,15 @@ macro_rules! string_or_struct_impl {
                 M: MapAccess<'de>,
             {
                 $struct_name_remote::deserialize(de::value::MapAccessDeserializer::new(map))
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $struct_name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                deserializer.deserialize_any(StringOrStruct::<Self>(PhantomData))
             }
         }
     };
@@ -386,9 +457,59 @@ macro_rules! vec_or_struct_impl {
                 $struct_name_remote::deserialize(de::value::MapAccessDeserializer::new(map))
             }
         }
+
+        impl<'de> Deserialize<'de> for $struct_name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                deserializer.deserialize_any(VecOrStruct::<Self>(PhantomData))
+            }
+        }
+    };
+}
+
+#[macro_export]
+macro_rules! u64_or_struct {
+    ($struct_name: ident, $struct_name_remote: ident) => {
+        impl<'de> Visitor<'de> for U64OrStruct<$struct_name> {
+            type Value = $struct_name;
+
+            fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+                write!(
+                    formatter,
+                    "list of strings or struct {} expected",
+                    std::any::type_name::<Self::Value>()
+                )
+            }
+
+            fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
+            where
+                E: de::Error,
+            {
+                Ok(Self::Value::from(value))
+            }
+
+            fn visit_map<M>(self, map: M) -> Result<Self::Value, M::Error>
+            where
+                M: MapAccess<'de>,
+            {
+                $struct_name_remote::deserialize(de::value::MapAccessDeserializer::new(map))
+            }
+        }
+
+        impl<'de> Deserialize<'de> for $struct_name {
+            fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+            where
+                D: Deserializer<'de>,
+            {
+                deserializer.deserialize_any(U64OrStruct::<Self>(PhantomData))
+            }
+        }
     };
 }
 
 string_or_struct_impl!(Secure, SecureDef);
 vec_or_struct_impl!(Queue, QueueDef);
 vec_or_struct_impl!(ServiceDiscovery, ServiceDiscoveryDef);
+u64_or_struct!(GarbageCollector, GarbageCollectorDef);

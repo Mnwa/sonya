@@ -136,7 +136,7 @@ async fn main() -> tokio::io::Result<()> {
     let address = config
         .addr
         .unwrap_or_else(|| SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 8080));
-    let service_token = config.secure.map(|s| s.service_token);
+    let secure = config.secure;
     let standard_queues: DefaultQueues = config.queue.map(|q| q.default).unwrap_or_default();
 
     let (cx, rx) = futures::channel::oneshot::channel();
@@ -188,7 +188,7 @@ async fn main() -> tokio::io::Result<()> {
                 subscribe_queue_by_id_longpoll,
                 subscribe_queue_ws,
                 subscribe_queue_longpoll,
-                service_token.clone()
+                &secure,
             ))
     });
 
