@@ -6,7 +6,7 @@
   </a>
 </p>
 
-> **sonya** is a fast, distributed queue that provide a flexible realization of the `Web Queue` in [Web Queue Worker](https://principles.green/principles/applied/web-queue-worker/) architecture.
+> **sonya** is a fast, distributed queue that provides a flexible realization of the `Web Queue` in [Web Queue Worker](https://principles.green/principles/applied/web-queue-worker/) architecture.
 > **sonya** provides Service Mesh architecture and supports `etcd` as a Service Discovery.
 
 ### 🏠 [Homepage](https://github.com/Mnwa/sonya)
@@ -16,7 +16,7 @@
 **sonya** supports simple and flexible configuring.
 > You don't need to use any configurations to up the simple service
 
-Also, service has a lot of options that can be configured from the environment, yaml and json.
+Also, the service has a lot of options that can be configured from the environment, YAML, and JSON.
 
 #### [Configure documentation](https://github.com/Mnwa/sonya/documentation/configure.md)
 
@@ -42,7 +42,7 @@ addr: 0.0.0.0:8080
 }
 ```
 ### Simple interface
-**sonya** provide a simple API that can be used from websites frontend, backends, etc.
+**sonya** provides a simple API that can be used from websites frontend, backends, etc.
 
 #### [API documentation](https://github.com/Mnwa/sonya/documentation/api.md)
 
@@ -79,10 +79,10 @@ curl -X POST --location "http://localhost:8081/queue/send/my_queue_name" \
 
 #### [Sharding documentation](https://github.com/Mnwa/sonya/documentation/sharding.md)
 
-* **queue** - is the service that provides queue functionality and may be easy sharded.
+* **queue** - is the service that provides queue functionality and may be easily sharded.
 * **proxy** - is the service that will be balancing queues and ids between **queue** shards.
 
-Every request must be sent to one of the **proxy** services, and they will be routing it to needed **queue** service.
+Every request must be sent to one of the **proxy** services, and they will be routing it to the needed **queue** service.
 
 For registering **queue** services in **proxy**, you can use **proxy** api or `etcd`.
 
@@ -200,7 +200,7 @@ curl -X POST --location "http://localhost:8081/queue/send/test" \
 
 ## 🤝 Contributing
 
-Contributions, issues and feature requests are welcome!<br />Feel free to check [issues page](https://github.com/Mnwa/sonya/issues). 
+Contributions, issues, and feature requests are welcome!<br />Feel free to check [issues page](https://github.com/Mnwa/sonya/issues).
 
 ## Show your support
 
