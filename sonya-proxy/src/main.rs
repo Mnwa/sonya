@@ -444,7 +444,7 @@ async fn service_registry_api(
 ) -> impl Responder {
     let mut updater = RegistryApiUpdater::clone(&updater);
     match updater.0.send(list.into_inner()).await {
-        Ok(_) => Ok("UPDATED"),
+        Ok(_) => Ok(HttpResponse::Ok().json(BaseQueueResponse { success: true })),
         Err(_) => Err(actix_web::error::ErrorInternalServerError(
             "Service discovery was broken",
         )),

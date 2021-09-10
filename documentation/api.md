@@ -59,3 +59,23 @@ Example:
 POST http://{host}:{port}/queue/generate_jwt/{queue_name}/{key}
 Authorization: Bearer {service_token}
 ```
+
+### Service Discovery
+
+Endpoints for updating proxy queues list.
+
+#### List
+* [Update queues list:](./api/service_discovery.md) `POST /registry`
+
+#### Security
+
+When service tokens are provided, methods from these sections are available
+with the `Authorization` header or `access_token` query param and `service token`.
+Example:
+```http request
+POST http://{host}:{port}/registry
+Content-Type: application/json
+Authorization: Bearer {service_token}
+
+["http://queue_host:8080"]
+```
