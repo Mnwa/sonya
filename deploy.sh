@@ -31,6 +31,7 @@ publish_crates_package() {
   pushd ./"$PACKAGE" >/dev/null 2>&1
   cargo publish
   popd >/dev/null 2>&1
+  sleep 2
 }
 
 publish_docker_package() {
