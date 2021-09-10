@@ -225,6 +225,7 @@ pub struct Tls {
 #[derive(Serialize, Clone, Debug)]
 pub struct Secure {
     pub service_token: SecureToken,
+    #[serde(default = "default_jwt_token_expiration")]
     pub jwt_token_expiration: u64,
 }
 
@@ -344,6 +345,7 @@ enum ServiceDiscoveryDef {
     Etcd {
         default: Option<Shards>,
         hosts: ServiceDiscoveryHosts,
+        #[serde(default = "default_sd_prefix")]
         prefix: String,
         instance_opts: Option<ServiceDiscoveryInstanceOptions>,
     },

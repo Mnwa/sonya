@@ -48,7 +48,7 @@ addr: 0.0.0.0:8080
 
 #### Curl example subscribe
 > where `my_queue_name` and `my_id` are the queue name and id that you will listen to.
-```bash
+```shell
 curl --include \
     --no-buffer \
     --header "Connection: Upgrade" \
@@ -62,7 +62,7 @@ curl --include \
 
 #### Curl example send message
 > where `my_queue_name` and `my_id` is the queue name and id whose listeners will be received this message.
-```bash
+```shell
 curl -X POST --location "http://localhost:8081/queue/send/my_queue_name" \
     -H "Host: localhost:8081" \
     -H "Content-Type: application/json" \
@@ -103,12 +103,12 @@ cargo install sonya-proxy
 ```
 
 ### Run server
-```bash
+```shell
 CONFIG=ENV QUEUE_DEFAULT=test sonya
 ```
 
 ### Run proxy
-```bash
+```shell
 CONFIG=ENV SERVICE_DISCOVERY_DEFAULT_SHARDS=http://localhost:8080 sonya-proxy
 ```
 
@@ -164,8 +164,8 @@ services:
 ### Usage
 
 #### Subscribe to updates
-```bash
-```bash
+```shell
+```shell
 curl --include \
     --no-buffer \
     --header "Connection: Upgrade" \
@@ -178,8 +178,8 @@ curl --include \
 ```
 
 #### Send message
-```bash
-```bash
+```shell
+```shell
 curl -X POST --location "http://localhost:8081/queue/send/test" \
     -H "Host: localhost:8081" \
     -H "Content-Type: application/json" \
