@@ -38,6 +38,7 @@ impl WebSocketProxyClientsStorage {
         registry: Addr<RegistryActor>,
         service_discovery: Addr<ServiceDiscoveryActor>,
         garbage_interval: u64,
+        access_token: Option<String>,
     ) -> Addr<WebSocketProxyClient> {
         let addr = {
             let guard = self.0.read().await;
@@ -56,6 +57,7 @@ impl WebSocketProxyClientsStorage {
                     queue_name,
                     id,
                     garbage_interval,
+                    access_token,
                 );
 
                 guard.insert(key, addr.clone());
@@ -72,9 +74,17 @@ impl WebSocketProxyClientsStorage {
         registry: Addr<RegistryActor>,
         service_discovery: Addr<ServiceDiscoveryActor>,
         garbage_interval: u64,
+        access_token: Option<String>,
     ) -> Option<broadcast::Receiver<WebSocketActorResponse>> {
         let addr = self
-            .get_addr(key, headers, registry, service_discovery, garbage_interval)
+            .get_addr(
+                key,
+                headers,
+                registry,
+                service_discovery,
+                garbage_interval,
+                access_token,
+            )
             .await;
 
         let receiver = addr.send(Subscribe).await;
@@ -97,6 +107,7 @@ pub struct WebSocketProxyClient {
     garbage_interval: u64,
     attempts: u8,
     sender: broadcast::Sender<WebSocketActorResponse>,
+    access_token: Option<String>,
 }
 
 impl Actor for WebSocketProxyClient {
@@ -226,6 +237,7 @@ impl WebSocketProxyClient {
         queue_name: String,
         id: Option<String>,
         garbage_interval: u64,
+        access_token: Option<String>,
     ) -> Addr<Self> {
         Self {
             headers,
@@ -236,6 +248,7 @@ impl WebSocketProxyClient {
             garbage_interval,
             attempts: 0,
             sender: broadcast::channel(8).0,
+            access_token,
         }
         .start()
     }
@@ -245,10 +258,15 @@ impl WebSocketProxyClient {
         let service_discovery = self.service_discovery.clone();
         let queue_name = self.queue_name.clone();
         let id = self.id.clone().expect("empty id");
-        let path = format!("/queue/listen/ws/{}/{}", queue_name, id);
         let headers = self.headers.clone();
         let attempt = self.attempts;
         let client = Client::default();
+        let access_token = self.access_token.clone();
+
+        let path = access_token.map_or_else(
+            || format!("/queue/listen/ws/{}/{}", queue_name, id),
+            |at| format!("/queue/listen/ws/{}/{}?access_token={}", queue_name, id, at),
+        );
 
         async_stream::try_stream! {
             sleep_between_reconnects(attempt).await;
@@ -274,10 +292,15 @@ impl WebSocketProxyClient {
     fn add_stream_all(&self) -> impl Stream<Item = WebSocketClientResponse> {
         let registry = self.registry.clone();
         let service_discovery = self.service_discovery.clone();
-        let path = format!("/queue/listen/ws/{}", self.queue_name);
         let headers = self.headers.clone();
         let attempt = self.attempts;
         let client = Client::default();
+        let access_token = self.access_token.clone();
+
+        let path = access_token.map_or_else(
+            || format!("/queue/listen/ws/{}", self.queue_name),
+            |at| format!("/queue/listen/ws/{}?access_token={}", self.queue_name, at),
+        );
 
         async_stream::try_stream! {
             sleep_between_reconnects(attempt).await;

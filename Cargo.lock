@@ -1796,6 +1796,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "serde_qs"
+version = "0.8.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "d8a72808528a89fa9eca23bbb6a1eb92cb639b881357269b6510f11e50c0f8a9"
+dependencies = [
+ "percent-encoding",
+ "serde",
+ "thiserror",
+]
+
+[[package]]
 name = "serde_urlencoded"
 version = "0.7.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1894,7 +1905,7 @@ dependencies = [
 
 [[package]]
 name = "sonya"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "actix",
  "actix-web",
@@ -1912,7 +1923,7 @@ dependencies = [
 
 [[package]]
 name = "sonya-meta"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "actix-web",
  "env_logger",
@@ -1920,12 +1931,13 @@ dependencies = [
  "openssl",
  "serde",
  "serde_json",
+ "serde_qs",
  "serde_yaml",
 ]
 
 [[package]]
 name = "sonya-proxy"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "actix",
  "actix-web",
@@ -2042,6 +2054,26 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2dfed899f0eb03f32ee8c6a0aabdb8a7949659e3466561fc0adf54e26d88c5f4"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "thiserror"
+version = "1.0.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "602eca064b2d83369e2b2f34b09c70b605402801927c65c11071ac911d299b88"
+dependencies = [
+ "thiserror-impl",
+]
+
+[[package]]
+name = "thiserror-impl"
+version = "1.0.29"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "bad553cc2c78e8de258400763a647e80e6d1b31ee237275d756f6836d204494c"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn",
 ]
 
 [[package]]

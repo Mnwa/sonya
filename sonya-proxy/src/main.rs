@@ -21,7 +21,7 @@ use awc::Client;
 use futures::future::Either;
 use futures::{SinkExt, StreamExt, TryStreamExt};
 use log::{error, info};
-use sonya_meta::api::service_token_guard;
+use sonya_meta::api::{extract_access_token_from_query, service_token_guard};
 use sonya_meta::config::{get_config, Config, ServiceDiscovery};
 use sonya_meta::message::EventMessage;
 use sonya_meta::queue_scope_factory;
@@ -79,7 +79,7 @@ async fn subscribe_queue_by_id_longpoll(
     )
     .await;
 
-    logpoll_response_factory!(receiver)
+    logpoll_response_factory(receiver).await
 }
 
 async fn subscribe_queue_ws(
@@ -130,7 +130,7 @@ async fn subscribe_queue_longpoll(
     )
     .await;
 
-    logpoll_response_factory!(receiver)
+    logpoll_response_factory(receiver).await
 }
 
 fn create_ws_header_map(config: &Config, r_headers: &RequestHead) -> HeaderMap {
@@ -174,43 +174,43 @@ async fn create_receiver(
             Addr::clone(registry),
             Addr::clone(service_discovery),
             config.garbage_collector.interval,
+            extract_access_token_from_query(head),
         )
         .await
 }
 
-#[macro_export]
-macro_rules! logpoll_response_factory {
-    ($receiver:ident) => {{
-        let mut r = match $receiver {
-            Some(r) => r,
-            None => return Err(actix_web::error::ErrorGone("No one available connection")),
-        };
+async fn logpoll_response_factory(
+    receiver: Option<tokio::sync::broadcast::Receiver<WebSocketActorResponse>>,
+) -> Result<HttpResponse, Error> {
+    let mut r = match receiver {
+        Some(r) => r,
+        None => return Err(actix_web::error::ErrorGone("No one available connection")),
+    };
 
-        let stream = async_stream::stream! {
-            while let Ok(WebSocketActorResponse::Message(f)) = r.recv().await {
-                yield f
-            }
-        };
-
-        let response = stream
-            .filter_map(|f: Arc<Frame>| async move {
-                match f.as_ref() {
-                    Frame::Binary(b) => Some(b.clone()),
-                    Frame::Text(b) => Some(b.clone()),
-                    _ => None,
-                }
-            })
-            .boxed()
-            .next()
-            .await;
-
-        match response {
-            Some(b) => Ok(HttpResponse::Ok()
-                .content_type(HeaderValue::from_static("application/json"))
-                .body(b)),
-            None => Err(actix_web::error::ErrorGone("No one available connection")),
+    let stream = async_stream::stream! {
+        while let Ok(WebSocketActorResponse::Message(f)) = r.recv().await {
+            yield f
         }
-    }};
+    };
+
+    let response = stream
+        .filter_map(|f: Arc<Frame>| async move {
+            match f.as_ref() {
+                Frame::Binary(b) => Some(b.clone()),
+                Frame::Text(b) => Some(b.clone()),
+                _ => None,
+            }
+        })
+        .boxed()
+        .next()
+        .await;
+
+    match response {
+        Some(b) => Ok(HttpResponse::Ok()
+            .content_type(HeaderValue::from_static("application/json"))
+            .body(b)),
+        None => Err(actix_web::error::ErrorGone("No one available connection")),
+    }
 }
 
 async fn create_queue(
@@ -221,9 +221,11 @@ async fn create_queue(
 
     let client = Client::default();
 
-    let requests = addresses
-        .into_iter()
-        .map(|address| client.request_from(address + req.path(), req.head()).send());
+    let requests = addresses.into_iter().map(|address| {
+        client
+            .request_from(address + prepare_path(&req).as_str(), req.head())
+            .send()
+    });
 
     let result: Result<Vec<_>, _> = futures::future::join_all(requests)
         .await
@@ -254,7 +256,7 @@ async fn send_to_queue(
     let address = get_address(registry.get_ref(), queue_name, message.id.clone()).await;
 
     let response = client
-        .request_from(address.clone() + req.path(), req.head())
+        .request_from(address.clone() + prepare_path(&req).as_str(), req.head())
         .send_json(&message.into_inner())
         .await;
 
@@ -282,9 +284,11 @@ async fn close_queue(req: HttpRequest, registry: web::Data<Addr<RegistryActor>>)
 
     let client = Client::default();
 
-    let requests = addresses
-        .into_iter()
-        .map(|address| client.request_from(address + req.path(), req.head()).send());
+    let requests = addresses.into_iter().map(|address| {
+        client
+            .request_from(address + prepare_path(&req).as_str(), req.head())
+            .send()
+    });
 
     let result: Result<Vec<_>, _> = futures::future::join_all(requests)
         .await
@@ -299,6 +303,15 @@ async fn close_queue(req: HttpRequest, registry: web::Data<Addr<RegistryActor>>)
                 "One of shards is not responding",
             ))
         }
+    }
+}
+
+fn prepare_path(req: &HttpRequest) -> String {
+    let uri = req.head().uri.clone();
+
+    match uri.path_and_query() {
+        None => uri.path().to_string(),
+        Some(p) => p.to_string(),
     }
 }
 
