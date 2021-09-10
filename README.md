@@ -13,14 +13,16 @@
 
 ## Top use cases
 ### Heavy requests
-Move your long time and heavy tasks to backend workers. 
-When it's processed notify clients with **SonyaWQ**. 
+Move your long time and heavy tasks to backend workers.
+When they will be processed notify clients with SonyaWQ.
 
 ### Broadcast updates between clients
 Notify clients about any changes on every device.
 
-### Add more interactive
-Add interactive for your clients. Chat rooms, text editing, playing in chess and etc.
+### Interactive
+Add interactive for your clients. 
+
+Chat rooms, text editing, playing chess, etc.
 
 ## Features
 ### Flexible configuring
