@@ -230,7 +230,7 @@ TLS_PRIVATE_KEY=key.pem
 TLS_CERT=key.pem
 
 #Secure options
-SECURE_SERVICE_TOKEN=xxx #Service token
+SECURE_SERVICE_TOKEN=service_token_test #Service token
 SECURE_JWT_EXPIRATION_TIME=60 #Jwt expiration time
 
 #Queue options
@@ -372,7 +372,7 @@ TLS_PRIVATE_KEY=key.pem
 TLS_CERT=key.pem
 
 #Secure options
-SECURE_SERVICE_TOKEN=xxx #Service token
+SECURE_SERVICE_TOKEN=service_token_test #Service token
 SECURE_JWT_EXPIRATION_TIME=60 #Jwt expiration time
 
 # Service discovery
