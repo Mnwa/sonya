@@ -1,4 +1,6 @@
 use crate::queue::connection::BroadcastMessage;
+use futures::stream::BoxStream;
+use futures::Stream;
 use log::info;
 use serde::Serialize;
 use sonya_meta::config::DefaultQueues;
@@ -17,7 +19,7 @@ pub struct Queue<T> {
     map: QueueMap<T>,
 }
 
-impl<T: 'static + Clone + Serialize + UniqId> Queue<T> {
+impl<T: 'static + Send + Clone + Serialize + UniqId> Queue<T> {
     pub fn create_queue(&mut self, queue_name: String) -> bool {
         if self.map.contains_key(&queue_name) {
             info!("queue {} already created", queue_name);
@@ -35,14 +37,14 @@ impl<T: 'static + Clone + Serialize + UniqId> Queue<T> {
         &self,
         queue_name: String,
         id: String,
-    ) -> impl Future<Output = Option<broadcast::Receiver<BroadcastMessage<T>>>> {
+    ) -> impl Future<Output = Option<BoxStream<'static, BroadcastMessage<T>>>> {
         let guard: Option<QueueIdMap<T>> =
             self.map.get(&queue_name).map(|(_, m)| m).map(Arc::clone);
         async move {
             let guard = guard?;
             let queue = guard.read().await;
             if let Some(tx) = queue.get(&id) {
-                return Some(tx.subscribe());
+                return Some(prepare_stream(tx.subscribe()));
             }
             drop(queue);
 
@@ -51,16 +53,17 @@ impl<T: 'static + Clone + Serialize + UniqId> Queue<T> {
 
             queue.insert(id, tx);
 
-            Some(rx)
+            Some(prepare_stream(rx))
         }
     }
 
     pub fn subscribe_queue(
         &self,
         queue_name: String,
-    ) -> Option<broadcast::Receiver<BroadcastMessage<T>>> {
+    ) -> Option<BoxStream<'static, BroadcastMessage<T>>> {
         let tx = self.map.get(&queue_name).map(|(tx, _)| tx);
-        Some(tx?.subscribe())
+
+        Some(prepare_stream(tx?.subscribe()))
     }
 
     pub fn send_to_queue(&self, queue_name: String, value: T) -> impl Future<Output = bool> {
@@ -123,7 +126,7 @@ impl<T: 'static + Clone + Serialize + UniqId> Queue<T> {
     }
 }
 
-impl<T: 'static + Clone + Serialize + UniqId> From<DefaultQueues> for Queue<T> {
+impl<T: 'static + Send + Clone + Serialize + UniqId> From<DefaultQueues> for Queue<T> {
     fn from(queue_names: DefaultQueues) -> Self {
         let mut queue = Self::default();
         for queue_name in queue_names {
@@ -139,4 +142,14 @@ impl<T> Default for Queue<T> {
             map: Default::default(),
         }
     }
+}
+
+fn prepare_stream<T: 'static + Send + Clone>(
+    mut rx: broadcast::Receiver<BroadcastMessage<T>>,
+) -> BoxStream<'static, BroadcastMessage<T>> {
+    Box::pin(async_stream::stream! {
+        while let Ok(m) = rx.recv().await {
+            yield m
+        }
+    })
 }

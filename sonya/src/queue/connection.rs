@@ -4,20 +4,15 @@ use actix_web_actors::ws::{CloseCode, CloseReason};
 use log::{error, info};
 use serde::Serialize;
 use sonya_meta::message::UniqId;
-use tokio::sync::broadcast;
 
-pub struct QueueConnection<T> {
+pub struct QueueConnection<S> {
     id: Option<String>,
     queue_name: String,
-    queue: Option<broadcast::Receiver<BroadcastMessage<T>>>,
+    queue: Option<S>,
 }
 
-impl<T> QueueConnection<T> {
-    pub fn new(
-        id: Option<String>,
-        queue_name: String,
-        queue: broadcast::Receiver<BroadcastMessage<T>>,
-    ) -> Self {
+impl<S> QueueConnection<S> {
+    pub fn new(id: Option<String>, queue_name: String, queue: S) -> Self {
         Self {
             id,
             queue_name,
@@ -26,18 +21,15 @@ impl<T> QueueConnection<T> {
     }
 }
 
-impl<T: 'static + Clone + Serialize + UniqId> Actor for QueueConnection<T> {
+impl<S, T> Actor for QueueConnection<S>
+where
+    S: 'static + Stream<Item = BroadcastMessage<T>> + Unpin,
+    T: 'static + Clone + Serialize + UniqId,
+{
     type Context = ws::WebsocketContext<Self>;
 
     fn started(&mut self, ctx: &mut Self::Context) {
-        let mut queue = self.queue.take().expect("queue is none");
-        let stream = async_stream::stream! {
-             while let Ok(message) = queue.recv().await {
-                yield message
-            }
-        };
-
-        ctx.add_stream(stream);
+        ctx.add_stream(self.queue.take().expect("queue is none"));
 
         info!(
             "created connection for queue: {}, id: {}",
@@ -55,8 +47,10 @@ impl<T: 'static + Clone + Serialize + UniqId> Actor for QueueConnection<T> {
     }
 }
 
-impl<T: 'static + Clone + Serialize + UniqId> StreamHandler<Result<ws::Message, ws::ProtocolError>>
-    for QueueConnection<T>
+impl<S, T> StreamHandler<Result<ws::Message, ws::ProtocolError>> for QueueConnection<S>
+where
+    S: 'static + Stream<Item = BroadcastMessage<T>> + Unpin,
+    T: 'static + Clone + Serialize + UniqId,
 {
     fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
         match msg {
@@ -71,8 +65,10 @@ impl<T: 'static + Clone + Serialize + UniqId> StreamHandler<Result<ws::Message, 
     }
 }
 
-impl<T: 'static + Clone + Serialize + UniqId> StreamHandler<BroadcastMessage<T>>
-    for QueueConnection<T>
+impl<S, T> StreamHandler<BroadcastMessage<T>> for QueueConnection<S>
+where
+    S: 'static + Stream<Item = BroadcastMessage<T>> + Unpin,
+    T: 'static + Clone + Serialize + UniqId,
 {
     fn handle(&mut self, message: BroadcastMessage<T>, ctx: &mut Self::Context) {
         match message {

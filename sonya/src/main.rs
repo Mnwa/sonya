@@ -4,7 +4,7 @@ use actix_web::middleware::Logger;
 use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
 use actix_web_actors::ws;
 use futures::future::Either;
-use futures::FutureExt;
+use futures::{FutureExt, StreamExt};
 use log::info;
 use sonya_meta::config::{
     get_config, DefaultQueues, ServiceDiscovery, ServiceDiscoveryInstanceOptions,
@@ -81,9 +81,9 @@ macro_rules! longpoll_response_factory {
         match $queue_connection {
             None => Err(actix_web::error::ErrorNotFound("Queue not found")),
             Some(mut qc) => {
-                let message = qc.recv().await;
+                let message = qc.next().await;
                 match message {
-                    Ok(BroadcastMessage::Message(s)) => Ok(HttpResponse::Ok().json(s)),
+                    Some(BroadcastMessage::Message(s)) => Ok(HttpResponse::Ok().json(s)),
                     _ => Err(actix_web::error::ErrorGone("Queue was closed")),
                 }
             }
