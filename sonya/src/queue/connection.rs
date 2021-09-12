@@ -24,7 +24,7 @@ impl<S> QueueConnection<S> {
 impl<S, T> Actor for QueueConnection<S>
 where
     S: 'static + Stream<Item = BroadcastMessage<T>> + Unpin,
-    T: 'static + Clone + Serialize + UniqId,
+    T: 'static + Serialize + UniqId,
 {
     type Context = ws::WebsocketContext<Self>;
 
@@ -50,7 +50,7 @@ where
 impl<S, T> StreamHandler<Result<ws::Message, ws::ProtocolError>> for QueueConnection<S>
 where
     S: 'static + Stream<Item = BroadcastMessage<T>> + Unpin,
-    T: 'static + Clone + Serialize + UniqId,
+    T: 'static + Serialize + UniqId,
 {
     fn handle(&mut self, msg: Result<ws::Message, ws::ProtocolError>, ctx: &mut Self::Context) {
         match msg {
@@ -68,7 +68,7 @@ where
 impl<S, T> StreamHandler<BroadcastMessage<T>> for QueueConnection<S>
 where
     S: 'static + Stream<Item = BroadcastMessage<T>> + Unpin,
-    T: 'static + Clone + Serialize + UniqId,
+    T: 'static + Serialize + UniqId,
 {
     fn handle(&mut self, message: BroadcastMessage<T>, ctx: &mut Self::Context) {
         match message {

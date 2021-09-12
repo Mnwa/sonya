@@ -124,9 +124,10 @@ addr: 0.0.0.0:8080 # optional string, default 0.0.0.0:8080. Address which will b
 secure: # optional object. Will checks service token in header or query string if set.
   service_token: service_token_test # required string. Service token string.
   jwt_token_expiration: 60 # optional number, default 60. Jwt expiration time in seconds.
-queue: # optional object. Will setup default queues.
-  default: # required array of strings. Queues with these names will create automatically on queue startup
+queue: # optional object, default {default: [], db_path: "/tmp/sonya"}. Will setup default queues.
+  default: # optional array of strings, default empty. Queues with these names will create automatically on queue startup
     - queue_name
+  db_path: # optional string. Path to local storage, if not set, db works from RAM.
 tls: # optional object. Will enable tls.
   private_key: /private/key/path.pem # required string. Path to private key.
   cert: /cert/path.pem # required string. Path to cert.
@@ -156,7 +157,6 @@ service_discovery:
 ```yaml
 addr: 0.0.0.0:8080
 secure: service_token_test 
-queue: queue_name
 service_discovery: api
 ```
 
@@ -173,7 +173,8 @@ service_discovery: api
   "queue": {
     "default": [
         "queue_name"
-    ]
+    ],
+    "db_path": "/tmp/sonya"
   },
   "tls": {
     "private_key": "/private/key/path.pem",
@@ -216,7 +217,6 @@ service_discovery: api
 {
   "addr": "0.0.0.0:8080",
   "secure": "service_token_test",
-  "queue": "queue_name",
   "service_discovery": "api"
 }
 ```
@@ -235,6 +235,7 @@ SECURE_JWT_EXPIRATION_TIME=60 #Jwt expiration time
 
 #Queue options
 QUEUE_DEFAULT=test1;test #Default queues splits by ;, queue server only
+QUEUE_DB_PATH=/tmp/sonya # DB data path, queue server only. If not set, db works from RAM.
 
 # Service discovery
 SERVICE_DISCOVERY_TYPE=API #Possible service discovery types is API, ETCD

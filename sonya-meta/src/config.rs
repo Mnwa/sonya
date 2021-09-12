@@ -7,6 +7,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
+use std::path::PathBuf;
 use std::str::FromStr;
 
 /// Extracts config from yaml, json or environment
@@ -28,6 +29,7 @@ use std::str::FromStr;
 /// SECURE_SERVICE_TOKEN=xxx // Service token
 /// SECURE_JWT_EXPIRATION_TIME=60 // Jwt expiration time
 /// QUEUE_DEFAULT=test1;test // Default queues splits by ;, queue server only
+/// QUEUE_DB_PATH=/tmp/sonya // DB data path, queue server only
 /// SERVICE_DISCOVERY_TYPE=API // Possible service discovery types is API, ETCD
 /// SERVICE_DISCOVERY_HOSTS=http://etcd_host:port;http://etcd_host2:port // Hosts splits by ;, required by ETCD type
 /// SERVICE_DISCOVERY_DEFAULT_SHARDS=http://queue:port;http://queue2:port // Hosts splits by ;, required by ETCD type
@@ -107,15 +109,18 @@ fn websocket_from_env() -> Result<WebSocket, std::env::VarError> {
     Ok(websocket)
 }
 
-fn queue_from_env() -> Result<Option<Queue>, std::env::VarError> {
-    let default: Option<DefaultQueues> = from_env_optional("QUEUE_DEFAULT")?.map(|d| {
-        d.split(';')
-            .filter(|s| !s.is_empty())
-            .map(String::from)
-            .collect()
-    });
+fn queue_from_env() -> Result<Queue, std::env::VarError> {
+    let default: DefaultQueues = from_env_optional("QUEUE_DEFAULT")?
+        .map(|d| {
+            d.split(';')
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect()
+        })
+        .unwrap_or_default();
 
-    Ok(default.map(Queue::from))
+    let db_path = from_env_optional("QUEUE_DB_PATH")?.map(PathBuf::from);
+    Ok(Queue { default, db_path })
 }
 
 fn service_discovery_from_env() -> Result<Option<ServiceDiscovery>, std::env::VarError> {
@@ -208,7 +213,7 @@ pub struct Config {
     pub addr: Option<SocketAddr>,
     pub tls: Option<Tls>,
     pub secure: Option<Secure>,
-    pub queue: Option<Queue>,
+    pub queue: Queue,
     pub service_discovery: Option<ServiceDiscovery>,
     #[serde(default)]
     pub websocket: WebSocket,
@@ -272,21 +277,11 @@ impl Default for WebSocket {
     }
 }
 
-#[derive(Serialize, Clone, Debug)]
+#[derive(Serialize, Deserialize, Clone, Debug)]
 pub struct Queue {
+    #[serde(default)]
     pub default: DefaultQueues,
-}
-
-#[derive(Deserialize)]
-#[serde(remote = "Queue")]
-struct QueueDef {
-    pub default: DefaultQueues,
-}
-
-impl From<DefaultQueues> for Queue {
-    fn from(default: DefaultQueues) -> Self {
-        Self { default }
-    }
+    pub db_path: Option<PathBuf>,
 }
 
 pub type DefaultQueues = Vec<String>;
@@ -518,6 +513,5 @@ macro_rules! u64_or_struct {
 }
 
 string_or_struct_impl!(Secure, SecureDef);
-vec_or_struct_impl!(Queue, QueueDef);
 vec_or_struct_impl!(ServiceDiscovery, ServiceDiscoveryDef);
 u64_or_struct!(GarbageCollector, GarbageCollectorDef);

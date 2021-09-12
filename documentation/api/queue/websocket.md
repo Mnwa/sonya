@@ -30,7 +30,6 @@ If successful, will respond with websocket byte messages:
 ```json
 {
   "id": "1",
-  "timestamp": 1631282055,
   "payload": {
     "message": "hello"
   }
@@ -93,7 +92,6 @@ If successful, will respond with websocket byte messages:
 ```json
 {
   "id": "1",
-  "timestamp": 1631282055,
   "payload": {
     "message": "hello"
   }

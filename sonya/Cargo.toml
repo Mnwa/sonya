@@ -29,3 +29,5 @@ sonya-meta = { version = "0.3", path = "../sonya-meta" }
 uuid = { version = "0.8", features = ["v4"] }
 futures = "0.3"
 etcd-client = { version = "0.7", optional = true, features = ["tls"] }
+sled = "0.34"
+derive_more = "0.99"

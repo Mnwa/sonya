@@ -1,155 +1,153 @@
 use crate::queue::connection::BroadcastMessage;
+use derive_more::{Display, Error, From};
 use futures::stream::BoxStream;
-use futures::Stream;
-use log::info;
+use serde::de::DeserializeOwned;
 use serde::Serialize;
+use sled::{Batch, Event, Subscriber};
 use sonya_meta::config::DefaultQueues;
 use sonya_meta::message::UniqId;
-use std::collections::HashMap;
-use std::future::Future;
-use std::sync::Arc;
-use tokio::sync::{broadcast, RwLock};
+use std::num::NonZeroU128;
+use std::time::{SystemTime, SystemTimeError};
 
-type MessageSender<T> = broadcast::Sender<BroadcastMessage<T>>;
-type QueueIdMap<T> = Arc<RwLock<HashMap<String, MessageSender<T>>>>;
-pub type QueueMap<T> = HashMap<String, (MessageSender<T>, QueueIdMap<T>)>;
+pub type QueueMap = sled::Db;
 
 #[derive(Debug)]
-pub struct Queue<T> {
-    map: QueueMap<T>,
+pub struct Queue {
+    map: QueueMap,
 }
 
-impl<T: 'static + Send + Clone + Serialize + UniqId> Queue<T> {
-    pub fn create_queue(&mut self, queue_name: String) -> bool {
-        if self.map.contains_key(&queue_name) {
-            info!("queue {} already created", queue_name);
-            return false;
-        }
+impl Queue {
+    pub fn new(map: QueueMap, default: DefaultQueues) -> QueueResult<Self> {
+        let this = Self { map };
 
-        info!("queue {} successfully created", queue_name);
-        let (tx, _) = broadcast::channel(8);
-        self.map.insert(queue_name, (tx, Default::default()));
+        default.into_iter().try_for_each(|q| this.create_queue(q))?;
 
-        true
+        Ok(this)
+    }
+    pub fn create_queue(&self, queue_name: String) -> QueueResult<()> {
+        self.map
+            .open_tree(queue_name.as_bytes())
+            .map(|_| ())
+            .map_err(QueueError::from)
     }
 
-    pub fn subscribe_queue_by_id(
+    pub fn subscribe_queue_by_id<'a, T: 'a + Send + DeserializeOwned>(
         &self,
         queue_name: String,
         id: String,
-    ) -> impl Future<Output = Option<BoxStream<'static, BroadcastMessage<T>>>> {
-        let guard: Option<QueueIdMap<T>> =
-            self.map.get(&queue_name).map(|(_, m)| m).map(Arc::clone);
-        async move {
-            let guard = guard?;
-            let queue = guard.read().await;
-            if let Some(tx) = queue.get(&id) {
-                return Some(prepare_stream(tx.subscribe()));
-            }
-            drop(queue);
-
-            let mut queue = guard.write().await;
-            let (tx, rx) = broadcast::channel(8);
-
-            queue.insert(id, tx);
-
-            Some(prepare_stream(rx))
+    ) -> QueueResult<Option<BoxStream<'a, BroadcastMessage<T>>>> {
+        if !self.check_tree_exists(&queue_name) {
+            return Ok(None);
         }
+        let tree = self.map.open_tree(queue_name.as_bytes())?;
+
+        let subscription = tree.watch_prefix(id.as_bytes());
+
+        Ok(Some(prepare_stream(subscription)))
     }
 
-    pub fn subscribe_queue(
+    pub fn subscribe_queue<'a, T: 'a + Send + DeserializeOwned>(
         &self,
         queue_name: String,
-    ) -> Option<BoxStream<'static, BroadcastMessage<T>>> {
-        let tx = self.map.get(&queue_name).map(|(tx, _)| tx);
+    ) -> QueueResult<Option<BoxStream<'a, BroadcastMessage<T>>>> {
+        if !self.check_tree_exists(&queue_name) {
+            return Ok(None);
+        }
+        let tree = self.map.open_tree(queue_name.as_bytes())?;
 
-        Some(prepare_stream(tx?.subscribe()))
+        let subscription = tree.watch_prefix([]);
+
+        Ok(Some(prepare_stream(subscription)))
     }
 
-    pub fn send_to_queue(&self, queue_name: String, value: T) -> impl Future<Output = bool> {
-        let queue = self
-            .map
-            .get(&queue_name)
-            .map(|(tx, m)| (tx.clone(), Arc::clone(m)));
-        async move {
-            match queue {
-                None => {
-                    info!("queue {} was not created", queue_name);
-                    false
-                }
-                Some((tx, guard)) => {
-                    let queue_id_map = guard.read().await;
-                    match queue_id_map.get(value.get_id()) {
-                        None if tx.receiver_count() > 0 => info!(
-                            "no one listeners for accepting message in queue {}",
-                            queue_name
-                        ),
-                        None => info!("sent only to global queue {}", queue_name),
-                        Some(tx) => match tx.send(BroadcastMessage::Message(value.clone())) {
-                            Ok(brokers) => info!(
-                                "message in queue {} accepted by {} brokers",
-                                queue_name, brokers
-                            ),
-                            Err(_) => info!(
-                                "no one brokers for accepting message in queue {}",
-                                queue_name
-                            ),
-                        },
-                    }
-                    let _ = tx.send(BroadcastMessage::Message(value));
-                    true
-                }
+    pub fn send_to_queue<T: 'static + Clone + Serialize + UniqId>(
+        &self,
+        queue_name: String,
+        mut value: T,
+    ) -> QueueResult<bool> {
+        if !self.check_tree_exists(&queue_name) {
+            return Ok(false);
+        }
+
+        let sequence = match value.get_sequence() {
+            None => {
+                let s = SystemTime::now()
+                    .duration_since(SystemTime::UNIX_EPOCH)?
+                    .as_nanos();
+
+                match NonZeroU128::new(s) {
+                    None => return Err(QueueError::ZeroSequence),
+                    Some(s) => value.set_sequence(s),
+                };
+
+                s
             }
-        }
+            Some(s) => s.get(),
+        };
+
+        let id = get_id(value.get_id(), sequence);
+
+        let tree = self.map.open_tree(queue_name.as_bytes())?;
+        let mut batch = Batch::default();
+
+        batch.insert(id, serde_json::to_vec(&value)?);
+        tree.scan_prefix(value.get_id().as_bytes())
+            .rev()
+            .skip(10)
+            .try_for_each::<_, QueueResult<()>>(|r| {
+                let (k, _) = r?;
+                batch.remove(k);
+                Ok(())
+            })?;
+
+        tree.apply_batch(batch)?;
+
+        Ok(true)
     }
 
-    pub fn close_queue(&mut self, queue_name: String) -> impl Future<Output = bool> {
-        let guard = self.map.remove(&queue_name);
-        async move {
-            match guard {
-                Some((tx, guard)) => {
-                    let listeners = guard.read().await;
-                    for (_, listener) in listeners.iter() {
-                        let _ = listener.send(BroadcastMessage::Close);
-                    }
-
-                    let _ = tx.send(BroadcastMessage::Close);
-
-                    true
-                }
-                None => {
-                    info!("closing not created queue {}", queue_name);
-                    false
-                }
-            }
-        }
+    pub fn close_queue(&self, queue_name: String) -> QueueResult<bool> {
+        self.map.drop_tree(queue_name).map_err(QueueError::from)
     }
-}
 
-impl<T: 'static + Send + Clone + Serialize + UniqId> From<DefaultQueues> for Queue<T> {
-    fn from(queue_names: DefaultQueues) -> Self {
-        let mut queue = Self::default();
-        for queue_name in queue_names {
-            queue.create_queue(queue_name);
-        }
-        queue
-    }
-}
-
-impl<T> Default for Queue<T> {
-    fn default() -> Self {
-        Self {
-            map: Default::default(),
-        }
+    fn check_tree_exists(&self, queue_name: &str) -> bool {
+        matches!(
+            self.map
+                .tree_names()
+                .into_iter()
+                .find(|v| v == queue_name.as_bytes()),
+            Some(_)
+        )
     }
 }
 
-fn prepare_stream<T: 'static + Send + Clone>(
-    mut rx: broadcast::Receiver<BroadcastMessage<T>>,
-) -> BoxStream<'static, BroadcastMessage<T>> {
+fn prepare_stream<'a, T: 'a + DeserializeOwned + Send>(
+    mut subscriber: Subscriber,
+) -> BoxStream<'a, BroadcastMessage<T>> {
     Box::pin(async_stream::stream! {
-        while let Ok(m) = rx.recv().await {
-            yield m
+        while let Some(event) = (&mut subscriber).await {
+            if let Event::Insert { value, .. } = event {
+                if let Ok(m) = serde_json::from_slice(&value) {
+                    yield BroadcastMessage::Message(m)
+                }
+            }
         }
     })
 }
+
+fn get_id(id: &str, sequence: u128) -> Vec<u8> {
+    let mut id = Vec::from(id.as_bytes());
+    id.extend_from_slice(&sequence.to_be_bytes());
+
+    id
+}
+
+#[derive(Debug, Display, From, Error)]
+pub enum QueueError {
+    Db(sled::Error),
+    Encode(serde_json::Error),
+    Time(SystemTimeError),
+    #[display(fmt = "sequence must be more then 0")]
+    ZeroSequence,
+}
+
+pub type QueueResult<T> = Result<T, QueueError>;
