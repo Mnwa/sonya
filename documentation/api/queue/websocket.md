@@ -30,6 +30,7 @@ If successful, will respond with websocket byte messages:
 ```json
 {
   "id": "1",
+  "sequence": 1,
   "payload": {
     "message": "hello"
   }
@@ -77,9 +78,9 @@ Sec-WebSocket-Version: 13
 ```
 
 **Query parameters**
-```http request
-?access_token={service_token} // required if secure mode is enabled
-```
+* `access_token={service_token}` Required when secure mod enabled.
+* `sequence={sequence_id}` Optional. If set, will be also sent all key updates with `>={sequence_id}` prediction.
+  The sequence may be used for restoring lost data on reconnection and other cases.
 
 ## Success Response
 
@@ -92,6 +93,7 @@ If successful, will respond with websocket byte messages:
 ```json
 {
   "id": "1",
+  "sequence": 1,
   "payload": {
     "message": "hello"
   }
