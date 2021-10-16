@@ -3,24 +3,38 @@ use derive_more::{Display, Error, From};
 use futures::stream::BoxStream;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use sled::{Batch, Event, Subscriber};
-use sonya_meta::config::DefaultQueues;
-use sonya_meta::message::UniqId;
-use std::num::NonZeroU128;
-use std::time::{SystemTime, SystemTimeError};
+use sled::{Batch, Event, IVec, Subscriber, Tree};
+use sonya_meta::config::Queue as QueueOptions;
+use sonya_meta::message::{Sequence, SequenceId, UniqId};
+use std::convert::TryInto;
+use std::fmt::Debug;
 
 pub type QueueMap = sled::Db;
 
 #[derive(Debug)]
 pub struct Queue {
     map: QueueMap,
+    max_key_updates: Option<usize>,
 }
 
 impl Queue {
-    pub fn new(map: QueueMap, default: DefaultQueues) -> QueueResult<Self> {
-        let this = Self { map };
+    pub fn new(config: QueueOptions) -> QueueResult<Self> {
+        let db_config = match config.db_path {
+            None => sled::Config::new().temporary(true),
+            Some(dp) => sled::Config::new().path(dp).use_compression(true),
+        };
 
-        default.into_iter().try_for_each(|q| this.create_queue(q))?;
+        let map = db_config.open()?;
+
+        let this = Self {
+            map,
+            max_key_updates: config.max_key_updates,
+        };
+
+        config
+            .default
+            .into_iter()
+            .try_for_each(|q| this.create_queue(q))?;
 
         Ok(this)
     }
@@ -31,19 +45,21 @@ impl Queue {
             .map_err(QueueError::from)
     }
 
-    pub fn subscribe_queue_by_id<'a, T: 'a + Send + DeserializeOwned>(
+    pub fn subscribe_queue_by_id<'a, T: 'a + Send + DeserializeOwned + Debug>(
         &self,
         queue_name: String,
         id: String,
+        sequence: Sequence,
     ) -> QueueResult<Option<BoxStream<'a, BroadcastMessage<T>>>> {
         if !self.check_tree_exists(&queue_name) {
             return Ok(None);
         }
         let tree = self.map.open_tree(queue_name.as_bytes())?;
 
+        let prev_items = get_prev_items::<T>(&tree, &id, sequence)?;
         let subscription = tree.watch_prefix(id.as_bytes());
 
-        Ok(Some(prepare_stream(subscription)))
+        Ok(Some(prepare_stream(subscription, prev_items)))
     }
 
     pub fn subscribe_queue<'a, T: 'a + Send + DeserializeOwned>(
@@ -57,7 +73,7 @@ impl Queue {
 
         let subscription = tree.watch_prefix([]);
 
-        Ok(Some(prepare_stream(subscription)))
+        Ok(Some(prepare_stream(subscription, None)))
     }
 
     pub fn send_to_queue<T: 'static + Clone + Serialize + UniqId>(
@@ -69,18 +85,15 @@ impl Queue {
             return Ok(false);
         }
 
+        let id = value.get_id();
+
         let sequence = match value.get_sequence() {
             None => {
-                let s = SystemTime::now()
-                    .duration_since(SystemTime::UNIX_EPOCH)?
-                    .as_nanos();
+                let id = self.generate_next_id(&queue_name, id)?;
 
-                match NonZeroU128::new(s) {
-                    None => return Err(QueueError::ZeroSequence),
-                    Some(s) => value.set_sequence(s),
-                };
+                value.set_sequence(id);
 
-                s
+                id.get()
             }
             Some(s) => s.get(),
         };
@@ -91,14 +104,17 @@ impl Queue {
         let mut batch = Batch::default();
 
         batch.insert(id, serde_json::to_vec(&value)?);
-        tree.scan_prefix(value.get_id().as_bytes())
-            .rev()
-            .skip(10)
-            .try_for_each::<_, QueueResult<()>>(|r| {
-                let (k, _) = r?;
-                batch.remove(k);
-                Ok(())
-            })?;
+
+        if let Some(m) = self.max_key_updates {
+            tree.scan_prefix(value.get_id().as_bytes())
+                .rev()
+                .skip(m.get())
+                .try_for_each::<_, QueueResult<()>>(|r| {
+                    let (k, _) = r?;
+                    batch.remove(k);
+                    Ok(())
+                })?;
+        }
 
         tree.apply_batch(batch)?;
 
@@ -118,12 +134,38 @@ impl Queue {
             Some(_)
         )
     }
+
+    fn generate_next_id(&self, queue_name: &str, id: &str) -> QueueResult<SequenceId> {
+        let mut key = Vec::from("id_");
+        key.extend_from_slice(queue_name.as_bytes());
+        key.extend_from_slice(id.as_bytes());
+
+        let res = self.map.update_and_fetch(key, |v| {
+            v.and_then(|v| Some(u64::from_be_bytes(v.try_into().ok()?)))
+                .and_then(|id| id.checked_add(1))
+                .map(|id| IVec::from(&id.to_be_bytes()))
+                .unwrap_or_else(|| IVec::from(&1u64.to_be_bytes()))
+                .into()
+        })?;
+
+        res.and_then(|r| Some(u64::from_be_bytes(r.as_ref().try_into().ok()?)))
+            .and_then(SequenceId::new)
+            .map(Ok)
+            .unwrap_or_else(|| Err(QueueError::ZeroSequence))
+    }
 }
 
 fn prepare_stream<'a, T: 'a + DeserializeOwned + Send>(
     mut subscriber: Subscriber,
+    prev_items: Option<Vec<T>>,
 ) -> BoxStream<'a, BroadcastMessage<T>> {
     Box::pin(async_stream::stream! {
+        if let Some(pi) = prev_items {
+            let mut iter = pi.into_iter();
+            while let Some(e) = iter.next() {
+                yield BroadcastMessage::Message(e)
+            }
+        }
         while let Some(event) = (&mut subscriber).await {
             if let Event::Insert { value, .. } = event {
                 if let Ok(m) = serde_json::from_slice(&value) {
@@ -134,18 +176,35 @@ fn prepare_stream<'a, T: 'a + DeserializeOwned + Send>(
     })
 }
 
-fn get_id(id: &str, sequence: u128) -> Vec<u8> {
+fn get_id(id: &str, sequence: u64) -> Vec<u8> {
     let mut id = Vec::from(id.as_bytes());
     id.extend_from_slice(&sequence.to_be_bytes());
 
     id
 }
 
+fn get_prev_items<T: DeserializeOwned>(
+    tree: &Tree,
+    id: &str,
+    sequence: Sequence,
+) -> QueueResult<Option<Vec<T>>> {
+    sequence
+        .map(|s| {
+            tree.range(get_id(id, s.get())..)
+                .map(|r| {
+                    r.map(|(_, v)| v)
+                        .map_err(QueueError::from)
+                        .and_then(|v| serde_json::from_slice(&v).map_err(QueueError::from))
+                })
+                .collect()
+        })
+        .transpose()
+}
+
 #[derive(Debug, Display, From, Error)]
 pub enum QueueError {
     Db(sled::Error),
     Encode(serde_json::Error),
-    Time(SystemTimeError),
     #[display(fmt = "sequence must be more then 0")]
     ZeroSequence,
 }

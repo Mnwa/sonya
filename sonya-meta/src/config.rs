@@ -7,6 +7,7 @@ use std::fs::File;
 use std::io::BufReader;
 use std::marker::PhantomData;
 use std::net::SocketAddr;
+use std::num::NonZeroUsize;
 use std::path::PathBuf;
 use std::str::FromStr;
 
@@ -30,6 +31,7 @@ use std::str::FromStr;
 /// SECURE_JWT_EXPIRATION_TIME=60 // Jwt expiration time
 /// QUEUE_DEFAULT=test1;test // Default queues splits by ;, queue server only
 /// QUEUE_DB_PATH=/tmp/sonya // DB data path, queue server only
+/// QUEUE_MAX_KEY_UPDATES=10 // Maximum key version to store
 /// SERVICE_DISCOVERY_TYPE=API // Possible service discovery types is API, ETCD
 /// SERVICE_DISCOVERY_HOSTS=http://etcd_host:port;http://etcd_host2:port // Hosts splits by ;, required by ETCD type
 /// SERVICE_DISCOVERY_DEFAULT_SHARDS=http://queue:port;http://queue2:port // Hosts splits by ;, required by ETCD type
@@ -120,7 +122,13 @@ fn queue_from_env() -> Result<Queue, std::env::VarError> {
         .unwrap_or_default();
 
     let db_path = from_env_optional("QUEUE_DB_PATH")?.map(PathBuf::from);
-    Ok(Queue { default, db_path })
+    let max_key_updates = from_env_optional("QUEUE_MAX_KEY_UPDATES")?
+        .map(|mku| mku.parse().expect("invalid max keys updates value"));
+    Ok(Queue {
+        default,
+        db_path,
+        max_key_updates,
+    })
 }
 
 fn service_discovery_from_env() -> Result<Option<ServiceDiscovery>, std::env::VarError> {
@@ -282,6 +290,7 @@ pub struct Queue {
     #[serde(default)]
     pub default: DefaultQueues,
     pub db_path: Option<PathBuf>,
+    pub max_key_updates: Option<usize>,
 }
 
 pub type DefaultQueues = Vec<String>;

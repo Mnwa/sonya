@@ -2,18 +2,19 @@ use crate::registry::{get_address, get_all_addresses, RegistryActor};
 use crate::service_discovery::{reloading_stream_factory, ServiceDiscoveryActor};
 use actix::prelude::*;
 use actix_web::http::HeaderMap;
-use awc::error::{WsClientError, WsProtocolError};
-use awc::ws::Frame;
-use awc::Client;
+use awc::{
+    error::{WsClientError, WsProtocolError},
+    ws::Frame,
+    Client,
+};
 use derive_more::{Display, Error, From};
 use futures::StreamExt;
 use log::{error, info};
-use sonya_meta::api::{sleep_between_reconnects, MAX_RECONNECT_ATTEMPTS};
-use std::collections::HashMap;
-use std::pin::Pin;
-use std::sync::Arc;
-use std::task::Poll;
-use std::time::Duration;
+use sonya_meta::{
+    api::{sleep_between_reconnects, MAX_RECONNECT_ATTEMPTS},
+    message::Sequence,
+};
+use std::{collections::HashMap, pin::Pin, sync::Arc, task::Poll, time::Duration};
 use tokio::sync::{broadcast, RwLock};
 
 #[derive(Debug, Clone, Hash, PartialOrd, PartialEq, Eq)]
@@ -39,31 +40,48 @@ impl WebSocketProxyClientsStorage {
         service_discovery: Addr<ServiceDiscoveryActor>,
         garbage_interval: u64,
         access_token: Option<String>,
+        sequence: Sequence,
     ) -> Addr<WebSocketProxyClient> {
-        let addr = {
-            let guard = self.0.read().await;
-            guard.get(&key).filter(|a| a.connected()).cloned()
-        };
+        if sequence.is_none() {
+            let addr = {
+                let guard = self.0.read().await;
+                guard.get(&key).filter(|a| a.connected()).cloned()
+            };
 
-        match addr {
-            Some(a) => a,
-            None => {
-                let mut guard = self.0.write().await;
-                let WebSocketProxyClientsStorageKey(queue_name, id) = key.clone();
-                let addr = WebSocketProxyClient::new(
-                    headers,
-                    registry,
-                    service_discovery,
-                    queue_name,
-                    id,
-                    garbage_interval,
-                    access_token,
-                );
+            match addr {
+                Some(a) => a,
+                None => {
+                    let mut guard = self.0.write().await;
+                    let WebSocketProxyClientsStorageKey(queue_name, id) = key.clone();
+                    let addr = WebSocketProxyClient::new(
+                        headers,
+                        registry,
+                        service_discovery,
+                        queue_name,
+                        id,
+                        garbage_interval,
+                        access_token,
+                        sequence,
+                    );
 
-                guard.insert(key, addr.clone());
+                    guard.insert(key, addr.clone());
 
-                addr
+                    addr
+                }
             }
+        } else {
+            let WebSocketProxyClientsStorageKey(queue_name, id) = key;
+
+            WebSocketProxyClient::new(
+                headers,
+                registry,
+                service_discovery,
+                queue_name,
+                id,
+                garbage_interval,
+                access_token,
+                sequence,
+            )
         }
     }
 
@@ -75,6 +93,7 @@ impl WebSocketProxyClientsStorage {
         service_discovery: Addr<ServiceDiscoveryActor>,
         garbage_interval: u64,
         access_token: Option<String>,
+        sequence: Sequence,
     ) -> Option<broadcast::Receiver<WebSocketActorResponse>> {
         let addr = self
             .get_addr(
@@ -84,6 +103,7 @@ impl WebSocketProxyClientsStorage {
                 service_discovery,
                 garbage_interval,
                 access_token,
+                sequence,
             )
             .await;
 
@@ -108,6 +128,7 @@ pub struct WebSocketProxyClient {
     attempts: u8,
     sender: broadcast::Sender<WebSocketActorResponse>,
     access_token: Option<String>,
+    sequence: Sequence,
 }
 
 impl Actor for WebSocketProxyClient {
@@ -238,6 +259,7 @@ impl WebSocketProxyClient {
         id: Option<String>,
         garbage_interval: u64,
         access_token: Option<String>,
+        sequence: Sequence,
     ) -> Addr<Self> {
         Self {
             headers,
@@ -249,6 +271,7 @@ impl WebSocketProxyClient {
             attempts: 0,
             sender: broadcast::channel(8).0,
             access_token,
+            sequence,
         }
         .start()
     }
@@ -261,12 +284,18 @@ impl WebSocketProxyClient {
         let headers = self.headers.clone();
         let attempt = self.attempts;
         let client = Client::default();
-        let access_token = self.access_token.clone();
 
-        let path = access_token.map_or_else(
-            || format!("/queue/listen/ws/{}/{}", queue_name, id),
-            |at| format!("/queue/listen/ws/{}/{}?access_token={}", queue_name, id, at),
-        );
+        let path = match (self.access_token.as_ref(), self.sequence) {
+            (Some(at), Some(s)) => format!(
+                "/queue/listen/ws/{}/{}?access_token={}&sequence={}",
+                queue_name, id, at, s
+            ),
+            (Some(at), None) => {
+                format!("/queue/listen/ws/{}/{}?access_token={}", queue_name, id, at)
+            }
+            (None, Some(s)) => format!("/queue/listen/ws/{}/{}?&sequence={}", queue_name, id, s),
+            (None, None) => format!("/queue/listen/ws/{}/{}", queue_name, id),
+        };
 
         async_stream::try_stream! {
             sleep_between_reconnects(attempt).await;
@@ -295,12 +324,18 @@ impl WebSocketProxyClient {
         let headers = self.headers.clone();
         let attempt = self.attempts;
         let client = Client::default();
-        let access_token = self.access_token.clone();
 
-        let path = access_token.map_or_else(
-            || format!("/queue/listen/ws/{}", self.queue_name),
-            |at| format!("/queue/listen/ws/{}?access_token={}", self.queue_name, at),
-        );
+        let path = match (self.access_token.as_ref(), self.sequence) {
+            (Some(at), Some(s)) => format!(
+                "/queue/listen/ws/{}?access_token={}&sequence={}",
+                self.queue_name, at, s
+            ),
+            (Some(at), None) => {
+                format!("/queue/listen/ws/{}?access_token={}", self.queue_name, at)
+            }
+            (None, Some(s)) => format!("/queue/listen/ws/{}?&sequence={}", self.queue_name, s),
+            (None, None) => format!("/queue/listen/ws/{}", self.queue_name),
+        };
 
         async_stream::try_stream! {
             sleep_between_reconnects(attempt).await;

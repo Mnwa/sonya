@@ -3,33 +3,43 @@ mod service_discovery;
 mod websocket_proxy;
 mod websocket_proxy_client;
 
-use crate::registry::{get_address, get_all_addresses, RegistryActor, RegistryList};
-use crate::service_discovery::ServiceDiscoveryActor;
-use crate::websocket_proxy::WebSocketProxyActor;
-use crate::websocket_proxy_client::{
-    WebSocketActorResponse, WebSocketProxyClientsStorage, WebSocketProxyClientsStorageKey,
+use crate::{
+    registry::{get_address, get_all_addresses, RegistryActor, RegistryList},
+    service_discovery::ServiceDiscoveryActor,
+    websocket_proxy::WebSocketProxyActor,
+    websocket_proxy_client::{
+        WebSocketActorResponse, WebSocketProxyClientsStorage, WebSocketProxyClientsStorageKey,
+    },
 };
 use actix::Addr;
-use actix_web::dev::RequestHead;
-use actix_web::http::HeaderMap;
-use actix_web::middleware::Logger;
-use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
+use actix_web::{
+    dev::RequestHead, http::HeaderMap, middleware::Logger, web, App, Error, HttpRequest,
+    HttpResponse, HttpServer, Responder,
+};
 use actix_web_actors::ws;
-use awc::http::{HeaderName, HeaderValue};
-use awc::ws::Frame;
-use awc::Client;
-use futures::future::Either;
-use futures::{SinkExt, StreamExt, TryStreamExt};
+use awc::{
+    http::{HeaderName, HeaderValue},
+    ws::Frame,
+    Client,
+};
+use futures::{future::Either, SinkExt, StreamExt, TryStreamExt};
 use log::{error, info};
-use sonya_meta::api::{extract_access_token_from_query, service_token_guard};
-use sonya_meta::config::{get_config, Config, ServiceDiscovery};
-use sonya_meta::message::EventMessage;
-use sonya_meta::queue_scope_factory;
-use sonya_meta::response::BaseQueueResponse;
-use sonya_meta::tls::get_options_from_config;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
-use std::sync::Arc;
-use std::time::Duration;
+use serde::Deserialize;
+use sonya_meta::{
+    api::extract_any_data_from_query,
+    api::service_token_guard,
+    config::{get_config, Config, ServiceDiscovery},
+    message::EventMessage,
+    message::Sequence,
+    queue_scope_factory,
+    response::BaseQueueResponse,
+    tls::get_options_from_config,
+};
+use std::{
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    sync::Arc,
+    time::Duration,
+};
 
 async fn subscribe_queue_by_id_ws(
     req: HttpRequest,
@@ -49,6 +59,7 @@ async fn subscribe_queue_by_id_ws(
         req.head(),
         registry.as_ref(),
         service_discovery.as_ref(),
+        get_sequence_from_req(&req),
     )
     .await;
 
@@ -76,6 +87,7 @@ async fn subscribe_queue_by_id_longpoll(
         req.head(),
         registry.as_ref(),
         service_discovery.as_ref(),
+        get_sequence_from_req(&req),
     )
     .await;
 
@@ -100,6 +112,7 @@ async fn subscribe_queue_ws(
         req.head(),
         registry.as_ref(),
         service_discovery.as_ref(),
+        get_sequence_from_req(&req),
     )
     .await;
 
@@ -127,10 +140,15 @@ async fn subscribe_queue_longpoll(
         req.head(),
         registry.as_ref(),
         service_discovery.as_ref(),
+        get_sequence_from_req(&req),
     )
     .await;
 
     logpoll_response_factory(receiver).await
+}
+
+fn get_sequence_from_req(req: &HttpRequest) -> SequenceQuery {
+    extract_any_data_from_query(req.head()).unwrap_or_default()
 }
 
 fn create_ws_header_map(config: &Config, r_headers: &RequestHead) -> HeaderMap {
@@ -166,6 +184,10 @@ async fn create_receiver(
     head: &RequestHead,
     registry: &Addr<RegistryActor>,
     service_discovery: &Addr<ServiceDiscoveryActor>,
+    SequenceQuery {
+        access_token,
+        sequence,
+    }: SequenceQuery,
 ) -> Option<tokio::sync::broadcast::Receiver<WebSocketActorResponse>> {
     proxies_storage
         .subscribe(
@@ -174,7 +196,8 @@ async fn create_receiver(
             Addr::clone(registry),
             Addr::clone(service_discovery),
             config.garbage_collector.interval,
-            extract_access_token_from_query(head),
+            access_token,
+            sequence,
         )
         .await
 }
@@ -241,6 +264,12 @@ async fn create_queue(
             ))
         }
     }
+}
+
+#[derive(Deserialize, Default)]
+struct SequenceQuery {
+    sequence: Sequence,
+    access_token: Option<String>,
 }
 
 async fn send_to_queue(

@@ -5,6 +5,8 @@ use actix_web::rt::time::sleep;
 use actix_web::web::Data;
 use actix_web::{web, HttpResponse};
 use jsonwebtoken::{decode, encode, DecodingKey, EncodingKey, Header, Validation};
+use log::error;
+use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use std::future::Future;
 use std::time::{Duration, SystemTime};
@@ -113,7 +115,6 @@ pub fn jwt_token_guard(secure: &Secure) -> impl Guard {
                 )
                 .ok()
                 .filter(|c| {
-                    println!("{}", head.uri.path());
                     head.uri
                         .path()
                         .ends_with(&format!("/{}/{}", c.claims.iss, c.claims.sub))
@@ -127,9 +128,19 @@ fn extract_access_token(head: &RequestHead) -> Option<String> {
     extract_access_token_from_header(head).or_else(|| extract_access_token_from_query(head))
 }
 
-pub fn extract_access_token_from_query(head: &RequestHead) -> Option<String> {
-    let AccessTokenQuery { access_token } = serde_qs::from_str(head.uri.query()?).ok()?;
-    Some(access_token)
+fn extract_access_token_from_query(head: &RequestHead) -> Option<String> {
+    extract_any_data_from_query::<AccessTokenQuery>(head).map(|a| a.access_token)
+}
+
+pub fn extract_any_data_from_query<T: DeserializeOwned>(head: &RequestHead) -> Option<T> {
+    head.uri.query().and_then(|v| {
+        serde_urlencoded::from_str(v)
+            .map_err(|e| {
+                error!("extracting sequence error: {}", e);
+                e
+            })
+            .ok()
+    })
 }
 
 fn extract_access_token_from_header(head: &RequestHead) -> Option<String> {

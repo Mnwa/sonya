@@ -6,11 +6,12 @@ use actix_web_actors::ws;
 use futures::future::Either;
 use futures::{FutureExt, Stream, StreamExt};
 use log::{error, info};
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
+use sonya_meta::api::extract_any_data_from_query;
 use sonya_meta::config::{
-    get_config, Queue as ConfigQueue, ServiceDiscovery, ServiceDiscoveryInstanceOptions,
+    get_config, ServiceDiscovery, ServiceDiscoveryInstanceOptions,
 };
-use sonya_meta::message::{EventMessage, UniqId};
+use sonya_meta::message::{EventMessage, Sequence, UniqId};
 use sonya_meta::queue_scope_factory;
 use sonya_meta::response::BaseQueueResponse;
 use sonya_meta::tls::get_options_from_config;
@@ -26,18 +27,26 @@ async fn subscribe_queue_by_id_ws(
     info: web::Path<(String, String)>,
 ) -> Result<HttpResponse, Error> {
     let (queue_name, id) = info.into_inner();
+    let sequence = get_sequence_from_req(&req);
     let queue_connection =
-        srv.subscribe_queue_by_id::<EventMessage>(queue_name.clone(), id.clone());
+        srv.subscribe_queue_by_id::<EventMessage>(queue_name.clone(), id.clone(), sequence);
     ws_response_factory(queue_connection, queue_name, Some(id), &req, stream).await
 }
 
 async fn subscribe_queue_by_id_longpoll(
+    req: HttpRequest,
     srv: web::Data<Queue>,
     info: web::Path<(String, String)>,
 ) -> Result<HttpResponse, Error> {
     let (queue_name, id) = info.into_inner();
-    let queue_connection = srv.subscribe_queue_by_id::<EventMessage>(queue_name, id);
+    let sequence = get_sequence_from_req(&req);
+    let queue_connection = srv.subscribe_queue_by_id::<EventMessage>(queue_name, id, sequence);
     longpoll_response_factory(queue_connection).await
+}
+
+fn get_sequence_from_req(req: &HttpRequest) -> Sequence {
+    let SequenceQuery { sequence } = extract_any_data_from_query(req.head()).unwrap_or_default();
+    sequence
 }
 
 async fn subscribe_queue_ws(
@@ -121,6 +130,11 @@ async fn create_queue(srv: web::Data<Queue>, info: web::Path<String>) -> impl Re
     }
 }
 
+#[derive(Deserialize, Default)]
+struct SequenceQuery {
+    sequence: Sequence,
+}
+
 async fn send_to_queue(
     srv: web::Data<Queue>,
     info: web::Path<String>,
@@ -160,10 +174,7 @@ async fn main() -> tokio::io::Result<()> {
         .addr
         .unwrap_or_else(|| SocketAddr::new(IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)), 8080));
     let secure = config.secure;
-    let ConfigQueue {
-        default: standard_queues,
-        db_path,
-    } = config.queue;
+    let queue_options = config.queue;
 
     let (cx, rx) = futures::channel::oneshot::channel();
 
@@ -200,13 +211,7 @@ async fn main() -> tokio::io::Result<()> {
         t => panic!("Invalid service discovery type accepted: {}", t.unwrap()),
     };
 
-    let db_config = match db_path {
-        None => sled::Config::new().temporary(true),
-        Some(dp) => sled::Config::new().path(dp).use_compression(true),
-    };
-
-    let db = db_config.open().unwrap();
-    let queue = web::Data::new(Queue::new(db, standard_queues).unwrap());
+    let queue = web::Data::new(Queue::new(queue_options).unwrap());
 
     let server = HttpServer::new(move || {
         App::new()
