@@ -66,6 +66,7 @@ Authorization: Bearer {service_token} // required if secure mode is enabled
 **Query parameters**
 * `sequence={sequence_id}` Optional. If set, will be sent key with `=={sequence_id}` prediction.
   The sequence may be used for restoring lost data on reconnection and other cases.
+  [More about sequence.](../../sequence.md)
 
 ## Success Response
 

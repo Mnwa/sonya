@@ -98,25 +98,27 @@ impl Queue {
             Some(s) => s.get(),
         };
 
-        let id = get_id(value.get_id(), sequence);
+        if !matches!(self.max_key_updates, Some(0)) {
+            let id = get_id(value.get_id(), sequence);
 
-        let tree = self.map.open_tree(queue_name.as_bytes())?;
-        let mut batch = Batch::default();
+            let tree = self.map.open_tree(queue_name.as_bytes())?;
+            let mut batch = Batch::default();
 
-        batch.insert(id, serde_json::to_vec(&value)?);
+            batch.insert(id, serde_json::to_vec(&value)?);
 
-        if let Some(m) = self.max_key_updates {
-            tree.scan_prefix(value.get_id().as_bytes())
-                .rev()
-                .skip(m)
-                .try_for_each::<_, QueueResult<()>>(|r| {
-                    let (k, _) = r?;
-                    batch.remove(k);
-                    Ok(())
-                })?;
+            if let Some(m) = self.max_key_updates {
+                tree.scan_prefix(value.get_id().as_bytes())
+                    .rev()
+                    .skip(m)
+                    .try_for_each::<_, QueueResult<()>>(|r| {
+                        let (k, _) = r?;
+                        batch.remove(k);
+                        Ok(())
+                    })?;
+            }
+
+            tree.apply_batch(batch)?;
         }
-
-        tree.apply_batch(batch)?;
 
         Ok(true)
     }

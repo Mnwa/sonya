@@ -43,7 +43,13 @@ Chat rooms, text editing, playing chess, etc.
 
 ### Request tokens protection
 **SonyaWQ** provides the `JWT` and `Service Token` requests protection support.
+
 #### [Tokens documentation](./documentation/secure.md)
+
+### Save state changes
+**SonyaWQ** uses the `sequences` mechanism that saves from losing data when the client has some troubles.
+
+#### [Sequences](./documentation/sequence.md)
 
 ## Architectures visualization
 
