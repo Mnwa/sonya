@@ -1,6 +1,6 @@
 [package]
 name = "sonya-meta"
-version = "0.3.2"
+version = "0.4.0"
 edition = "2018"
 description = "Common packages for backend and proxy web queue"
 repository = "https://github.com/Mnwa/sonya"

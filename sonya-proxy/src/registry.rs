@@ -1,13 +1,15 @@
 use actix::prelude::*;
 use log::{error, info};
+use maglev::{ConsistentHasher, Maglev};
 use parking_lot::RwLock;
 use sonya_meta::config::Shards;
 use std::collections::hash_map::DefaultHasher;
-use std::hash::{Hash, Hasher};
+use std::hash::{BuildHasherDefault, Hash};
 use std::sync::Arc;
 
-type RegistryStore = Arc<RwLock<RegistryList>>;
+type RegistryStore = Arc<RwLock<RegistryConsistentList>>;
 pub type RegistryList = Shards;
+pub type RegistryConsistentList = Maglev<String, BuildHasherDefault<DefaultHasher>>;
 
 pub struct RegistryActor {
     registry: RegistryStore,
@@ -19,7 +21,8 @@ impl Actor for RegistryActor {
 
 impl RegistryActor {
     pub fn new(registry: RegistryList) -> Addr<Self> {
-        let registry = RegistryStore::new(registry.into());
+        let list: RegistryConsistentList = RegistryConsistentList::new(registry);
+        let registry = RegistryStore::new(RwLock::new(list));
         SyncArbiter::start(num_cpus::get(), move || Self {
             registry: registry.clone(),
         })
@@ -30,20 +33,18 @@ impl Handler<GetAddress> for RegistryActor {
     type Result = MessageResult<GetAddress>;
 
     fn handle(&mut self, msg: GetAddress, _ctx: &mut Self::Context) -> Self::Result {
-        let mut hasher = DefaultHasher::new();
-        msg.hash(&mut hasher);
-        let hash = hasher.finish();
         let registry = self.registry.read();
-        if registry.is_empty() {
+        if registry.nodes().is_empty() {
             error!("no one queue service is not registered in service discovery");
             return MessageResult(None);
         }
-        let shard = registry[(hash % registry.len() as u64) as usize].clone();
+
+        let shard = registry.get(&msg).cloned();
         info!(
-            "chosen new shard for queue: {} and id: {}, shard: {}",
+            "chosen new shard for queue: {} and id: {}, shard: {:#?}",
             msg.0, msg.1, shard
         );
-        MessageResult(Some(shard))
+        MessageResult(shard)
     }
 }
 
@@ -52,11 +53,12 @@ impl Handler<GetAllAddresses> for RegistryActor {
 
     fn handle(&mut self, _msg: GetAllAddresses, _ctx: &mut Self::Context) -> Self::Result {
         let registry = self.registry.read();
-        if registry.is_empty() {
+        let nodes = registry.nodes().to_vec();
+        if nodes.is_empty() {
             error!("no one queue service is not registered in service discovery");
             return MessageResult(None);
         }
-        MessageResult(Some(Vec::clone(registry.as_ref())))
+        MessageResult(Some(nodes))
     }
 }
 
@@ -68,17 +70,19 @@ impl Handler<UpdateRegistry> for RegistryActor {
         UpdateRegistry(new_registry): UpdateRegistry,
         _ctx: &mut Self::Context,
     ) -> Self::Result {
+        let mut registry = self.registry.write();
+        let n = new_registry.len();
         info!(
             "updated registry, old: {:#?}, new: {:#?}",
-            self.registry, new_registry
+            registry.nodes(),
+            new_registry
         );
-        let mut registry = self.registry.write();
-        *registry = new_registry;
+        *registry = Maglev::with_capacity(new_registry, registry.capacity().max(n));
         MessageResult(())
     }
 }
 
-#[derive(Message, Hash, Debug)]
+#[derive(Message, Hash, Debug, Eq, PartialEq)]
 #[rtype(result = "Option<String>")]
 pub struct GetAddress(String, String);
 

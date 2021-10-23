@@ -19,6 +19,7 @@ This is the most useful way to create distributed and scalable solutions.
 SonyaWQ cluster will consist of two parts:
 * `Queue`. Many instances of queues from the first schema, but messages of every queue will distribute between every queue instance.
 * `Proxy`. Proxy instances will be automatically distributing messages between queues.
+  The proxy uses the `Maglev` consistent hashing algorithm for routing messages.
 
 #### Service discovery
 Every proxy must know about all available queue shards in your cluster.

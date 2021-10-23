@@ -1,6 +1,6 @@
 [package]
 name = "sonya-proxy"
-version = "0.3.2"
+version = "0.4.0"
 edition = "2018"
 description = "Proxy for sharding queues of your web queue cluster"
 repository = "https://github.com/Mnwa/sonya"
@@ -24,7 +24,7 @@ awc = "3.0.0-beta.8"
 serde = "1"
 serde_json = "1"
 log = "0.4"
-sonya-meta = { version = "0.3", path = "../sonya-meta" }
+sonya-meta = { version = "0.4", path = "../sonya-meta" }
 num_cpus = "1"
 ws = "0.9"
 futures = "0.3"
@@ -34,3 +34,4 @@ pin-project-lite = "0.2"
 etcd-client = { version = "0.7", optional = true, features = ["tls"] }
 derive_more = "0.99"
 tokio = { version = "1", features = ["sync"] }
+maglev = "0.2"
