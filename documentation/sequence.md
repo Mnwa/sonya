@@ -33,13 +33,13 @@ let sequence_id = 1;
 while (true) {
     const response = await fetch('http://localhost:8081/queue/listen/longpoll/test?sequence=' + sequence_id)
     const data = await response.json()
-    sequence_id = data.sequence_id + 1
+    sequence_id = data.sequence + 1
 }
 ```
 
 ### Custom sequence_id
 You can replace auto-generated `sequence_id` to own realization.
-Just set your `sequence_id` to message body on sending.
+Just set your `sequence` to message body on sending.
 ```http request
 POST http://localhost:8081/queue/send/test
 Host: localhost:8081
@@ -47,7 +47,7 @@ Content-Type: application/json
 
 {
   "id": "1",
-  "sequence_id": 999,
+  "sequence": 999,
   "payload": {
     "message": "hello"
   }
