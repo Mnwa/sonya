@@ -25,12 +25,12 @@ use awc::{
 use futures::{future::Either, SinkExt, StreamExt, TryStreamExt};
 use log::{error, info};
 use serde::Deserialize;
+use sonya_meta::message::RequestSequence;
 use sonya_meta::{
     api::extract_any_data_from_query,
     api::service_token_guard,
     config::{get_config, Config, ServiceDiscovery},
     message::EventMessage,
-    message::Sequence,
     queue_scope_factory,
     response::BaseQueueResponse,
     tls::get_options_from_config,
@@ -268,7 +268,7 @@ async fn create_queue(
 
 #[derive(Deserialize, Default)]
 struct SequenceQuery {
-    sequence: Sequence,
+    sequence: RequestSequence,
     access_token: Option<String>,
 }
 

@@ -5,7 +5,7 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use sled::{Batch, Event, IVec, Subscriber, Tree};
 use sonya_meta::config::Queue as QueueOptions;
-use sonya_meta::message::{Sequence, SequenceId, UniqId};
+use sonya_meta::message::{RequestSequence, RequestSequenceId, SequenceId, UniqId};
 use std::convert::TryInto;
 use std::fmt::Debug;
 
@@ -49,7 +49,7 @@ impl Queue {
         &self,
         queue_name: String,
         id: String,
-        sequence: Sequence,
+        sequence: RequestSequence,
     ) -> QueueResult<Option<BoxStream<'a, BroadcastMessage<T>>>> {
         if !self.check_tree_exists(&queue_name) {
             return Ok(None);
@@ -188,11 +188,11 @@ fn get_id(id: &str, sequence: u64) -> Vec<u8> {
 fn get_prev_items<T: DeserializeOwned>(
     tree: &Tree,
     id: &str,
-    sequence: Sequence,
+    sequence: RequestSequence,
 ) -> QueueResult<Option<Vec<T>>> {
     sequence
-        .map(|s| {
-            tree.range(get_id(id, s.get())..)
+        .map(|sequence_id| {
+            extract_sequences(tree, sequence_id, id)
                 .map(|r| {
                     r.map(|(_, v)| v)
                         .map_err(QueueError::from)
@@ -201,6 +201,18 @@ fn get_prev_items<T: DeserializeOwned>(
                 .collect()
         })
         .transpose()
+}
+
+fn extract_sequences(
+    tree: &Tree,
+    sequence_id: RequestSequenceId,
+    id: &str,
+) -> Box<dyn Iterator<Item = sled::Result<(IVec, IVec)>>> {
+    match sequence_id {
+        RequestSequenceId::Id(s) => Box::new(tree.range(get_id(id, s.get())..)),
+        RequestSequenceId::Last => Box::new(tree.scan_prefix(id.as_bytes()).rev().take(1)),
+        RequestSequenceId::First => Box::new(tree.scan_prefix(id.as_bytes()).take(1)),
+    }
 }
 
 #[derive(Debug, Display, From, Error)]

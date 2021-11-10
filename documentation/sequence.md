@@ -25,6 +25,8 @@ With the `sequence_id` you can receive missed updates of your key.
 `GET http://localhost:8081/queue/listen/longpoll/test?sequence={sequence_id}` will return the message with set `sequence_id`.
 If a message with set `sequence_id` does not exist, the method will wait for the next sent message.
 
+Also, `sequence_id` may accept `first` and `last` value. It's return to you first and last key versions from api.
+
 Long poll without data lost example:
 
 **Java Script**

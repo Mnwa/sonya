@@ -10,10 +10,8 @@ use awc::{
 use derive_more::{Display, Error, From};
 use futures::StreamExt;
 use log::{error, info};
-use sonya_meta::{
-    api::{sleep_between_reconnects, MAX_RECONNECT_ATTEMPTS},
-    message::Sequence,
-};
+use sonya_meta::api::{sleep_between_reconnects, MAX_RECONNECT_ATTEMPTS};
+use sonya_meta::message::RequestSequence;
 use std::{collections::HashMap, pin::Pin, sync::Arc, task::Poll, time::Duration};
 use tokio::sync::{broadcast, RwLock};
 
@@ -40,7 +38,7 @@ impl WebSocketProxyClientsStorage {
         service_discovery: Addr<ServiceDiscoveryActor>,
         garbage_interval: u64,
         access_token: Option<String>,
-        sequence: Sequence,
+        sequence: RequestSequence,
     ) -> Addr<WebSocketProxyClient> {
         if sequence.is_none() {
             let addr = {
@@ -93,7 +91,7 @@ impl WebSocketProxyClientsStorage {
         service_discovery: Addr<ServiceDiscoveryActor>,
         garbage_interval: u64,
         access_token: Option<String>,
-        sequence: Sequence,
+        sequence: RequestSequence,
     ) -> Option<broadcast::Receiver<WebSocketActorResponse>> {
         let addr = self
             .get_addr(
@@ -128,7 +126,7 @@ pub struct WebSocketProxyClient {
     attempts: u8,
     sender: broadcast::Sender<WebSocketActorResponse>,
     access_token: Option<String>,
-    sequence: Sequence,
+    sequence: RequestSequence,
 }
 
 impl Actor for WebSocketProxyClient {
@@ -259,7 +257,7 @@ impl WebSocketProxyClient {
         id: Option<String>,
         garbage_interval: u64,
         access_token: Option<String>,
-        sequence: Sequence,
+        sequence: RequestSequence,
     ) -> Addr<Self> {
         Self {
             headers,

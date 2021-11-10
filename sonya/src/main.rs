@@ -8,10 +8,8 @@ use futures::{FutureExt, Stream, StreamExt};
 use log::{error, info};
 use serde::{Deserialize, Serialize};
 use sonya_meta::api::extract_any_data_from_query;
-use sonya_meta::config::{
-    get_config, ServiceDiscovery, ServiceDiscoveryInstanceOptions,
-};
-use sonya_meta::message::{EventMessage, Sequence, UniqId};
+use sonya_meta::config::{get_config, ServiceDiscovery, ServiceDiscoveryInstanceOptions};
+use sonya_meta::message::{EventMessage, RequestSequence, UniqId};
 use sonya_meta::queue_scope_factory;
 use sonya_meta::response::BaseQueueResponse;
 use sonya_meta::tls::get_options_from_config;
@@ -44,8 +42,9 @@ async fn subscribe_queue_by_id_longpoll(
     longpoll_response_factory(queue_connection).await
 }
 
-fn get_sequence_from_req(req: &HttpRequest) -> Sequence {
+fn get_sequence_from_req(req: &HttpRequest) -> RequestSequence {
     let SequenceQuery { sequence } = extract_any_data_from_query(req.head()).unwrap_or_default();
+    println!("{:#?}", sequence);
     sequence
 }
 
@@ -132,7 +131,7 @@ async fn create_queue(srv: web::Data<Queue>, info: web::Path<String>) -> impl Re
 
 #[derive(Deserialize, Default)]
 struct SequenceQuery {
-    sequence: Sequence,
+    sequence: RequestSequence,
 }
 
 async fn send_to_queue(
