@@ -13,12 +13,12 @@ use crate::{
 };
 use actix::Addr;
 use actix_web::{
-    dev::RequestHead, http::HeaderMap, middleware::Logger, web, App, Error, HttpRequest,
+    dev::RequestHead, http::header::HeaderMap, middleware::Logger, web, App, Error, HttpRequest,
     HttpResponse, HttpServer, Responder,
 };
 use actix_web_actors::ws;
 use awc::{
-    http::{HeaderName, HeaderValue},
+    http::header::{HeaderName, HeaderValue},
     ws::Frame,
     Client,
 };

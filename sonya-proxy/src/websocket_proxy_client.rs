@@ -1,7 +1,7 @@
 use crate::registry::{get_address, get_all_addresses, RegistryActor};
 use crate::service_discovery::{reloading_stream_factory, ServiceDiscoveryActor};
 use actix::prelude::*;
-use actix_web::http::HeaderMap;
+use actix_web::http::header::HeaderMap;
 use awc::{
     error::{WsClientError, WsProtocolError},
     ws::Frame,
