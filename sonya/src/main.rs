@@ -44,7 +44,6 @@ async fn subscribe_queue_by_id_longpoll(
 
 fn get_sequence_from_req(req: &HttpRequest) -> RequestSequence {
     let SequenceQuery { sequence } = extract_any_data_from_query(req.head()).unwrap_or_default();
-    println!("{:#?}", sequence);
     sequence
 }
 
