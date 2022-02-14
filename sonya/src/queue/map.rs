@@ -109,7 +109,7 @@ impl Queue {
             if let Some(m) = self.max_key_updates {
                 tree.scan_prefix(value.get_id().as_bytes())
                     .rev()
-                    .skip(m)
+                    .skip(m - 1)
                     .try_for_each::<_, QueueResult<()>>(|r| {
                         let (k, _) = r?;
                         batch.remove(k);
