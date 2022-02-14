@@ -211,7 +211,7 @@ fn extract_sequences(
     match sequence_id {
         RequestSequenceId::Id(s) => Box::new(tree.range(get_id(id, s.get())..get_id(id, u64::MAX))),
         RequestSequenceId::Last => Box::new(tree.scan_prefix(id.as_bytes()).rev().take(1)),
-        RequestSequenceId::First => Box::new(tree.scan_prefix(id.as_bytes()).take(1)),
+        RequestSequenceId::First => Box::new(tree.scan_prefix(id.as_bytes())),
     }
 }
 
