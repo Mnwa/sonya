@@ -17,7 +17,7 @@ api = []
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-actix = "0.12"
+actix = "0.13"
 actix-web = { version = "4", features = ["openssl"] }
 actix-web-actors = "4"
 awc = "3"
