@@ -3,7 +3,7 @@ use derive_more::{Display, Error, From};
 use futures::stream::BoxStream;
 use serde::de::DeserializeOwned;
 use serde::Serialize;
-use sled::{Batch, Event, IVec, Subscriber, Tree};
+use sled::{Batch, IVec, Subscriber, Tree};
 use sonya_meta::config::Queue as QueueOptions;
 use sonya_meta::message::{RequestSequence, RequestSequenceId, SequenceId, UniqId};
 use std::convert::TryInto;
@@ -169,8 +169,9 @@ fn prepare_stream<'a, T: 'a + DeserializeOwned + Send>(
             }
         }
         while let Some(event) = (&mut subscriber).await {
-            if let Event::Insert { value, .. } = event {
-                if let Ok(m) = serde_json::from_slice(&value) {
+            let values = event.iter().map(|(_, _, v)| v).flat_map(|v| v).collect::<Vec<_>>();
+            for value in values {
+                if let Ok(m) = serde_json::from_slice(value) {
                     yield BroadcastMessage::Message(m)
                 }
             }

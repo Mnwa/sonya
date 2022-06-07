@@ -1,7 +1,7 @@
 [package]
 name = "sonya"
-version = "0.4.2"
-edition = "2018"
+version = "0.5.0"
+edition = "2021"
 description = "Backends for your web queue cluster"
 repository = "https://github.com/Mnwa/sonya"
 readme = "../README.md"
@@ -18,16 +18,21 @@ api = []
 
 [dependencies]
 actix = "0.12"
-actix-web = { version = "4.0.0-beta.15", features = ["openssl"] }
-actix-web-actors = "4.0.0-beta.8"
+actix-web = { version = "4", features = ["openssl"] }
+actix-web-actors = "4"
 serde = "1"
 serde_json = "1"
 tokio = { version = "1", features = ["sync"] }
 async-stream = "0.3"
 log = "0.4"
-sonya-meta = { version = "0.4", path = "../sonya-meta" }
+sonya-meta = { version = "0.5", path = "../sonya-meta" }
 uuid = { version = "0.8", features = ["v4"] }
 futures = "0.3"
 etcd-client = { version = "0.7", optional = true, features = ["tls"] }
-sled = { version = "0.34", features = ["compression"] }
 derive_more = "0.99"
+
+[dependencies.sled]
+version = "0.34"
+features = ["compression"]
+git = "https://github.com/spacejam/sled"
+rev = "e95ec05"

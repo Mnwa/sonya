@@ -96,8 +96,8 @@ macro_rules! queue_scope_factory {
 
 pub fn service_token_guard(secure: &Secure) -> impl Guard {
     let service_token = secure.service_token.clone();
-    actix_web::guard::fn_guard(move |head| {
-        extract_access_token(head)
+    actix_web::guard::fn_guard(move |ctx| {
+        extract_access_token(ctx.head())
             .filter(|token| *token == service_token)
             .is_some()
     })
@@ -105,8 +105,8 @@ pub fn service_token_guard(secure: &Secure) -> impl Guard {
 
 pub fn jwt_token_guard(secure: &Secure) -> impl Guard {
     let service_token = secure.service_token.clone();
-    actix_web::guard::fn_guard(move |head| {
-        extract_access_token(head)
+    actix_web::guard::fn_guard(move |ctx| {
+        extract_access_token(ctx.head())
             .and_then(|token| {
                 decode::<Claims>(
                     &token,
@@ -115,7 +115,8 @@ pub fn jwt_token_guard(secure: &Secure) -> impl Guard {
                 )
                 .ok()
                 .filter(|c| {
-                    head.uri
+                    ctx.head()
+                        .uri
                         .path()
                         .ends_with(&format!("/{}/{}", c.claims.iss, c.claims.sub))
                 })
@@ -171,7 +172,7 @@ pub fn generate_jwt_method_factory(secure: Secure) -> impl HttpServiceFactory {
         .guard(service_token_guard(&secure))
         .app_data(Data::new(secure))
         .route(web::post().to(
-            move |secure: web::Data<Secure>, info: web::Path<(String, String)>| async move {
+            move |secure: Data<Secure>, info: web::Path<(String, String)>| async move {
                 let (queue_name, id) = info.into_inner();
                 let expiration_res = SystemTime::now()
                     .checked_add(Duration::from_secs(secure.jwt_token_expiration))

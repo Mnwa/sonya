@@ -1,7 +1,7 @@
 [package]
 name = "sonya-proxy"
-version = "0.4.2"
-edition = "2018"
+version = "0.5.0"
+edition = "2021"
 description = "Proxy for sharding queues of your web queue cluster"
 repository = "https://github.com/Mnwa/sonya"
 readme = "../README.md"
@@ -18,13 +18,13 @@ api = []
 
 [dependencies]
 actix = "0.12"
-actix-web = { version = "4.0.0-beta.15", features = ["openssl"] }
-actix-web-actors = "4.0.0-beta.8"
-awc = "3.0.0-beta.14"
+actix-web = { version = "4", features = ["openssl"] }
+actix-web-actors = "4"
+awc = "3"
 serde = "1"
 serde_json = "1"
 log = "0.4"
-sonya-meta = { version = "0.4", path = "../sonya-meta" }
+sonya-meta = { version = "0.5", path = "../sonya-meta" }
 num_cpus = "1"
 ws = "0.9"
 futures = "0.3"
