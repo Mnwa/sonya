@@ -26,7 +26,7 @@ tokio = { version = "1", features = ["sync"] }
 async-stream = "0.3"
 log = "0.4"
 sonya-meta = { version = "0.5", path = "../sonya-meta" }
-uuid = { version = "0.8", features = ["v4"] }
+uuid = { version = "1", features = ["v4"] }
 futures = "0.3"
 etcd-client = { version = "0.7", optional = true, features = ["tls"] }
 derive_more = "0.99"
