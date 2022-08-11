@@ -15,9 +15,10 @@ Sec-WebSocket-Version: 13
 ```
 
 **Query parameters**
-```http request
-?access_token={jwt_token} // required if secure mode is enabled
-```
+* `access_token={service_token}` Required when secure mod enabled.
+* `sequence={sequence_id}` Optional. If set, will be also sent all key updates with `>={sequence_id}` prediction.
+  The sequence may be used for restoring lost data on reconnection and other cases.
+  [More about sequence.](../../sequence.md)
 
 ## Success Response
 
