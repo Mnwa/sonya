@@ -54,16 +54,19 @@ async fn subscribe_queue_ws(
     info: web::Path<(String,)>,
 ) -> Result<HttpResponse, Error> {
     let queue_name = info.into_inner().0;
-    let queue_connection = srv.subscribe_queue::<EventMessage>(queue_name.clone());
+    let sequence = get_sequence_from_req(&req);
+    let queue_connection = srv.subscribe_queue::<EventMessage>(queue_name.clone(), sequence);
     ws_response_factory(queue_connection, queue_name, None, &req, stream).await
 }
 
 async fn subscribe_queue_longpoll(
+    req: HttpRequest,
     srv: web::Data<Queue>,
     info: web::Path<(String,)>,
 ) -> Result<HttpResponse, Error> {
     let queue_name = info.into_inner().0;
-    let queue_connection = srv.subscribe_queue::<EventMessage>(queue_name);
+    let sequence = get_sequence_from_req(&req);
+    let queue_connection = srv.subscribe_queue::<EventMessage>(queue_name, sequence);
     longpoll_response_factory(queue_connection).await
 }
 

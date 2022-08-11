@@ -6,6 +6,7 @@ use serde::Serialize;
 use sled::{Batch, IVec, Subscriber, Tree};
 use sonya_meta::config::Queue as QueueOptions;
 use sonya_meta::message::{RequestSequence, RequestSequenceId, SequenceId, UniqId};
+use std::collections::HashMap;
 use std::convert::TryInto;
 use std::fmt::Debug;
 
@@ -45,7 +46,7 @@ impl Queue {
             .map_err(QueueError::from)
     }
 
-    pub fn subscribe_queue_by_id<'a, T: 'a + Send + DeserializeOwned + Debug>(
+    pub fn subscribe_queue_by_id<'a, T: 'a + Send + DeserializeOwned + Debug + UniqId>(
         &self,
         queue_name: String,
         id: String,
@@ -62,18 +63,21 @@ impl Queue {
         Ok(Some(prepare_stream(subscription, prev_items)))
     }
 
-    pub fn subscribe_queue<'a, T: 'a + Send + DeserializeOwned>(
+    pub fn subscribe_queue<'a, T: 'a + Send + DeserializeOwned + UniqId>(
         &self,
         queue_name: String,
+        sequence: RequestSequence,
     ) -> QueueResult<Option<BoxStream<'a, BroadcastMessage<T>>>> {
         if !self.check_tree_exists(&queue_name) {
             return Ok(None);
         }
         let tree = self.map.open_tree(queue_name.as_bytes())?;
 
+        let prev_items = get_prev_all_items::<T>(&tree, sequence)?;
+
         let subscription = tree.watch_prefix([]);
 
-        Ok(Some(prepare_stream(subscription, None)))
+        Ok(Some(prepare_stream(subscription, prev_items)))
     }
 
     pub fn send_to_queue<T: 'static + Clone + Serialize + UniqId>(
@@ -215,6 +219,59 @@ fn extract_sequences(
         RequestSequenceId::Last => Box::new(tree.scan_prefix(id.as_bytes()).rev().take(1)),
         RequestSequenceId::First => Box::new(tree.scan_prefix(id.as_bytes())),
     }
+}
+
+fn get_prev_all_items<T: DeserializeOwned + UniqId>(
+    tree: &Tree,
+    sequence: RequestSequence,
+) -> QueueResult<Option<Vec<T>>> {
+    sequence
+        .map(|sequence_id| {
+            let i = tree.iter().values().map(|v| {
+                v.map_err(QueueError::from)
+                    .and_then(|v| serde_json::from_slice(&v).map_err(QueueError::from))
+            });
+
+            let i: Box<dyn Iterator<Item = Result<T, QueueError>>> = match sequence_id {
+                RequestSequenceId::Id(s) => {
+                    Box::new(i.filter(move |v: &Result<T, QueueError>| match v {
+                        Ok(v) => v.get_sequence().filter(|cs| *cs >= s).is_some(),
+                        Err(_) => true,
+                    }))
+                }
+                RequestSequenceId::Last => {
+                    let mut map: HashMap<String, T> = HashMap::new();
+
+                    for item in i {
+                        match item {
+                            Ok(v) => {
+                                map.insert(v.get_id().to_string(), v);
+                            }
+                            e @ Err(_) => return e.map(|r| vec![r]),
+                        }
+                    }
+
+                    Box::new(map.into_values().map(Ok))
+                }
+                RequestSequenceId::First => {
+                    let mut map: HashMap<String, T> = HashMap::new();
+
+                    for item in i {
+                        match item {
+                            Ok(v) => {
+                                map.entry(v.get_id().to_string()).or_insert(v);
+                            }
+                            e @ Err(_) => return e.map(|r| vec![r]),
+                        }
+                    }
+
+                    Box::new(map.into_values().map(Ok))
+                }
+            };
+
+            i.collect::<Result<Vec<_>, _>>()
+        })
+        .transpose()
 }
 
 #[derive(Debug, Display, From, Error)]
