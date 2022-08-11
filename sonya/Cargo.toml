@@ -25,10 +25,10 @@ serde_json = "1"
 tokio = { version = "1", features = ["sync"] }
 async-stream = "0.3"
 log = "0.4"
-sonya-meta = { version = "0.5", path = "../sonya-meta" }
+sonya-meta = { version = "0.6", path = "../sonya-meta" }
 uuid = { version = "1", features = ["v4"] }
 futures = "0.3"
-etcd-client = { version = "0.7", optional = true, features = ["tls"] }
+etcd-client = { version = "0.10", optional = true, features = ["tls"] }
 derive_more = "0.99"
 
 [dependencies.sled]
