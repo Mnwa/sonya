@@ -6,7 +6,7 @@ use serde::Serialize;
 use sled::{Batch, IVec, Subscriber, Tree};
 use sonya_meta::config::Queue as QueueOptions;
 use sonya_meta::message::{RequestSequence, RequestSequenceId, SequenceId, UniqId};
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::convert::TryInto;
 use std::fmt::Debug;
 
@@ -240,7 +240,7 @@ fn get_prev_all_items<T: DeserializeOwned + UniqId>(
                     }))
                 }
                 RequestSequenceId::Last => {
-                    let mut map: HashMap<String, T> = HashMap::new();
+                    let mut map: BTreeMap<String, T> = BTreeMap::new();
 
                     for item in i {
                         match item {
@@ -254,7 +254,7 @@ fn get_prev_all_items<T: DeserializeOwned + UniqId>(
                     Box::new(map.into_values().map(Ok))
                 }
                 RequestSequenceId::First => {
-                    let mut map: HashMap<String, T> = HashMap::new();
+                    let mut map: BTreeMap<String, T> = BTreeMap::new();
 
                     for item in i {
                         match item {
