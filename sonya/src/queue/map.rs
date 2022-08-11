@@ -102,11 +102,12 @@ impl Queue {
             let id = get_id(value.get_id(), sequence);
 
             let tree = self.map.open_tree(queue_name.as_bytes())?;
-            let mut batch = Batch::default();
 
-            batch.insert(id, serde_json::to_vec(&value)?);
+            tree.insert(id, serde_json::to_vec(&value)?)?;
 
             if let Some(m) = self.max_key_updates {
+                let mut batch = Batch::default();
+
                 tree.scan_prefix(value.get_id().as_bytes())
                     .rev()
                     .skip(m - 1)
@@ -115,9 +116,9 @@ impl Queue {
                         batch.remove(k);
                         Ok(())
                     })?;
-            }
 
-            tree.apply_batch(batch)?;
+                tree.apply_batch(batch)?;
+            }
         }
 
         Ok(true)
@@ -169,7 +170,7 @@ fn prepare_stream<'a, T: 'a + DeserializeOwned + Send>(
             }
         }
         while let Some(event) = (&mut subscriber).await {
-            let values = event.iter().map(|(_, _, v)| v).flat_map(|v| v).collect::<Vec<_>>();
+            let values = event.iter().filter_map(|(_, _, v)| v.as_ref()).collect::<Vec<_>>();
             for value in values {
                 if let Ok(m) = serde_json::from_slice(value) {
                     yield BroadcastMessage::Message(m)
