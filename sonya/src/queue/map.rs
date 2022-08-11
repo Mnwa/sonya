@@ -253,20 +253,7 @@ fn get_prev_all_items<T: DeserializeOwned + UniqId>(
 
                     Box::new(map.into_values().map(Ok))
                 }
-                RequestSequenceId::First => {
-                    let mut map: BTreeMap<String, T> = BTreeMap::new();
-
-                    for item in i {
-                        match item {
-                            Ok(v) => {
-                                map.entry(v.get_id().to_string()).or_insert(v);
-                            }
-                            e @ Err(_) => return e.map(|r| vec![r]),
-                        }
-                    }
-
-                    Box::new(map.into_values().map(Ok))
-                }
+                RequestSequenceId::First => Box::new(i),
             };
 
             i.collect::<Result<Vec<_>, _>>()
