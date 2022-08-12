@@ -66,6 +66,11 @@ async fn subscribe_queue_longpoll(
 ) -> Result<HttpResponse, Error> {
     let queue_name = info.into_inner().0;
     let sequence = get_sequence_from_req(&req);
+    if sequence.is_some() {
+        return Err(actix_web::error::ErrorBadRequest(
+            "sequence is unsupported for longpoll queue",
+        ));
+    }
     let queue_connection = srv.subscribe_queue::<EventMessage>(queue_name, sequence);
     longpoll_response_factory(queue_connection).await
 }
