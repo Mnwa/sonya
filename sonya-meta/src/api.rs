@@ -16,6 +16,7 @@ const BEARER: &str = "Bearer ";
 #[macro_export]
 macro_rules! queue_scope_factory {
     (   $create_queue:ident,
+        $delete_queue:ident,
         $send_to_queue:ident,
         $close_queue:ident,
         $subscribe_queue_by_id_ws:ident,
@@ -27,6 +28,7 @@ macro_rules! queue_scope_factory {
         match $secure {
             None => web::scope("/queue")
                 .route("/create/{queue_name}", web::post().to($create_queue))
+                .route("/delete_queue/{queue_name}", web::post().to($delete_queue))
                 .route("/send/{queue_name}", web::post().to($send_to_queue))
                 .route("/close/{queue_name}", web::post().to($close_queue))
                 .service(

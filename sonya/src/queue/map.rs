@@ -39,9 +39,17 @@ impl Queue {
 
         Ok(this)
     }
+
     pub fn create_queue(&self, queue_name: String) -> QueueResult<()> {
         self.map
             .open_tree(queue_name.as_bytes())
+            .map(|_| ())
+            .map_err(QueueError::from)
+    }
+
+    pub fn delete_queue(&self, queue_name: String) -> QueueResult<()> {
+        self.map
+            .drop_tree(queue_name.as_bytes())
             .map(|_| ())
             .map_err(QueueError::from)
     }
