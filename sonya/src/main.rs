@@ -141,9 +141,12 @@ async fn create_queue(srv: web::Data<Queue>, info: web::Path<String>) -> impl Re
     }
 }
 
-async fn delete_queue(srv: web::Data<Queue>, info: web::Path<String>) -> impl Responder {
-    let queue_name = info.into_inner();
-    match srv.delete_queue(queue_name) {
+async fn delete_from_queue(
+    srv: web::Data<Queue>,
+    info: web::Path<(String, String)>,
+) -> impl Responder {
+    let (queue_name, id) = info.into_inner();
+    match srv.delete_queue(queue_name, id) {
         Err(e) => {
             error!("deleting queue error {}", e);
             Err(actix_web::error::ErrorInternalServerError(
@@ -243,7 +246,7 @@ async fn main() -> tokio::io::Result<()> {
             .app_data(queue.clone())
             .service(queue_scope_factory!(
                 create_queue,
-                delete_queue,
+                delete_from_queue,
                 send_to_queue,
                 close_queue,
                 subscribe_queue_by_id_ws,

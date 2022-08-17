@@ -1,8 +1,8 @@
 # Delete queue
 
-Delete a queue on every shard of SonyaWQ.
+Delete all events from queue by id on every shard of SonyaWQ.
 
-**URL** : `/queue/delete/{queue_name}`
+**URL** : `/queue/delete/{queue_name}/{key}`
 
 **Method** : `POST`
 
@@ -18,7 +18,7 @@ Authorization: Bearer {service_token} // required if secure mode is enabled
 **Request examples**
 
 ```http request
-POST http://localhost:8081/queue/delete/test
+POST http://localhost:8081/queue/delete/test/123
 Host: localhost:8081
 ```
 
@@ -34,13 +34,13 @@ If successful, will respond with:
 
 **CURL**
 ```bash
-curl -X POST --location "http://localhost:8081/queue/delete/test" \
+curl -X POST --location "http://localhost:8081/queue/delete/test/123" \
     -H "Host: localhost:8081"
 ```
 
 **Java Script**
 ```js
-fetch("http://localhost:8081/queue/delete/test", {
+fetch("http://localhost:8081/queue/delete/test/123", {
   method: "POST"
 })
 ```

@@ -266,6 +266,36 @@ async fn create_queue(
     }
 }
 
+async fn delete_from_queue(
+    req: HttpRequest,
+    registry: web::Data<Addr<RegistryActor>>,
+) -> impl Responder {
+    let addresses = get_all_addresses(registry.get_ref()).await;
+
+    let client = Client::default();
+
+    let requests = addresses.into_iter().map(|address| {
+        client
+            .request_from(address + prepare_path(&req).as_str(), req.head())
+            .send()
+    });
+
+    let result: Result<Vec<_>, _> = futures::future::join_all(requests)
+        .await
+        .into_iter()
+        .collect();
+
+    match result {
+        Ok(_) => Ok(HttpResponse::Ok().json(BaseQueueResponse { success: true })),
+        Err(e) => {
+            error!("delete from queue proxy error: {:#?}", e);
+            Err(actix_web::error::ErrorGone(
+                "One of shards is not responding",
+            ))
+        }
+    }
+}
+
 #[derive(Deserialize, Default)]
 struct SequenceQuery {
     sequence: RequestSequence,
@@ -420,6 +450,7 @@ async fn main() -> std::io::Result<()> {
             .app_data(shared_config.clone())
             .service(queue_scope_factory!(
                 create_queue,
+                delete_from_queue,
                 send_to_queue,
                 close_queue,
                 subscribe_queue_by_id_ws,

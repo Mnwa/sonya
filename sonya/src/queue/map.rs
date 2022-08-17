@@ -47,11 +47,18 @@ impl Queue {
             .map_err(QueueError::from)
     }
 
-    pub fn delete_queue(&self, queue_name: String) -> QueueResult<()> {
-        self.map
-            .drop_tree(queue_name.as_bytes())
-            .map(|_| ())
-            .map_err(QueueError::from)
+    pub fn delete_queue(&self, queue_name: String, id: String) -> QueueResult<()> {
+        let mut batch = Batch::default();
+
+        let tree = self.map.open_tree(queue_name.as_bytes())?;
+
+        for response in tree.scan_prefix(id.as_bytes()) {
+            let (key, _) = response?;
+
+            batch.remove(key);
+        }
+
+        tree.apply_batch(batch).map_err(QueueError::from)
     }
 
     pub fn subscribe_queue_by_id<'a, T: 'a + Send + DeserializeOwned + Debug + UniqId>(
