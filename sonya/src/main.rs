@@ -4,7 +4,7 @@ use actix_web::middleware::Logger;
 use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
 use actix_web_actors::ws;
 use futures::future::Either;
-use futures::{FutureExt, Stream, StreamExt};
+use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
 use log::{error, info};
 use serde::{Deserialize, Serialize};
 use sonya_meta::api::extract_any_data_from_query;
@@ -76,7 +76,7 @@ async fn subscribe_queue_longpoll(
 }
 
 async fn ws_response_factory<S, T>(
-    queue: QueueResult<Option<S>>,
+    queue: QueueResult<(Option<S>, Option<usize>)>,
     queue_name: String,
     id: Option<String>,
     req: &HttpRequest,
@@ -87,8 +87,8 @@ where
     T: 'static + Serialize + UniqId,
 {
     match queue {
-        Ok(Some(q)) => ws::start(QueueConnection::new(id, queue_name, q), req, stream),
-        Ok(None) => Err(actix_web::error::ErrorNotFound("Queue Not Found")),
+        Ok((Some(q), _)) => ws::start(QueueConnection::new(id, queue_name, q), req, stream),
+        Ok((None, _)) => Err(actix_web::error::ErrorNotFound("Queue Not Found")),
         Err(e) => {
             error!("websocket subscribe error {}", e);
             Err(actix_web::error::ErrorInternalServerError(
@@ -99,21 +99,26 @@ where
 }
 
 async fn longpoll_response_factory<S, T>(
-    queue: QueueResult<Option<S>>,
+    queue: QueueResult<(Option<S>, Option<usize>)>,
 ) -> Result<HttpResponse, Error>
 where
     S: Stream<Item = BroadcastMessage<T>> + Unpin,
     T: 'static + Serialize,
 {
     match queue {
-        Ok(Some(mut q)) => {
-            let message = q.next().await;
-            match message {
-                Some(BroadcastMessage::Message(s)) => Ok(HttpResponse::Ok().json(s)),
-                _ => Err(actix_web::error::ErrorGone("Queue was closed")),
-            }
+        Ok((Some(q), prev_len)) => {
+            let messages: Result<Vec<_>, _> = q
+                .take(prev_len.unwrap_or(1))
+                .map(|m| match m {
+                    BroadcastMessage::Message(s) => Ok(s),
+                    _ => Err(actix_web::error::ErrorGone("Queue was closed")),
+                })
+                .try_collect()
+                .await;
+
+            messages.map(|m| HttpResponse::Ok().json(m))
         }
-        Ok(None) => Err(actix_web::error::ErrorNotFound("Queue Not Found")),
+        Ok((None, _)) => Err(actix_web::error::ErrorNotFound("Queue Not Found")),
         Err(e) => {
             error!("longpoll subscribe error {}", e);
             Err(actix_web::error::ErrorInternalServerError(

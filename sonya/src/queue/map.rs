@@ -51,25 +51,27 @@ impl Queue {
         queue_name: String,
         id: String,
         sequence: RequestSequence,
-    ) -> QueueResult<Option<BoxStream<'a, BroadcastMessage<T>>>> {
+    ) -> QueueResult<(Option<BoxStream<'a, BroadcastMessage<T>>>, Option<usize>)> {
         if !self.check_tree_exists(&queue_name) {
-            return Ok(None);
+            return Ok((None, None));
         }
         let tree = self.map.open_tree(queue_name.as_bytes())?;
 
         let prev_items = get_prev_items::<T>(&tree, &id, sequence)?;
         let subscription = tree.watch_prefix(id.as_bytes());
 
-        Ok(Some(prepare_stream(subscription, prev_items)))
+        let prev_len = prev_items.as_ref().map(|i| i.len());
+
+        Ok((Some(prepare_stream(subscription, prev_items)), prev_len))
     }
 
     pub fn subscribe_queue<'a, T: 'a + Send + DeserializeOwned + UniqId>(
         &self,
         queue_name: String,
         sequence: RequestSequence,
-    ) -> QueueResult<Option<BoxStream<'a, BroadcastMessage<T>>>> {
+    ) -> QueueResult<(Option<BoxStream<'a, BroadcastMessage<T>>>, Option<usize>)> {
         if !self.check_tree_exists(&queue_name) {
-            return Ok(None);
+            return Ok((None, None));
         }
         let tree = self.map.open_tree(queue_name.as_bytes())?;
 
@@ -77,7 +79,9 @@ impl Queue {
 
         let subscription = tree.watch_prefix([]);
 
-        Ok(Some(prepare_stream(subscription, prev_items)))
+        let prev_len = prev_items.as_ref().map(|i| i.len());
+
+        Ok((Some(prepare_stream(subscription, prev_items)), prev_len))
     }
 
     pub fn send_to_queue<T: 'static + Clone + Serialize + UniqId>(
