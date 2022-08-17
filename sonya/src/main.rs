@@ -66,11 +66,6 @@ async fn subscribe_queue_longpoll(
 ) -> Result<HttpResponse, Error> {
     let queue_name = info.into_inner().0;
     let sequence = get_sequence_from_req(&req);
-    if sequence.is_some() {
-        return Err(actix_web::error::ErrorBadRequest(
-            "sequence is unsupported for longpoll queue",
-        ));
-    }
     let queue_connection = srv.subscribe_queue::<EventMessage>(queue_name, sequence);
     longpoll_response_factory(queue_connection).await
 }
@@ -108,7 +103,7 @@ where
     match queue {
         Ok((Some(q), prev_len)) => {
             let messages: Result<Vec<_>, _> = q
-                .take(prev_len.unwrap_or(1))
+                .take(prev_len.unwrap_or(1).max(1))
                 .map(|m| match m {
                     BroadcastMessage::Message(s) => Ok(s),
                     _ => Err(actix_web::error::ErrorGone("Queue was closed")),

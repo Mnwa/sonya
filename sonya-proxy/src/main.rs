@@ -81,6 +81,7 @@ async fn subscribe_queue_by_id_longpoll(
 
     let response = client
         .request_from(address + prepare_path(&req).as_str(), req.head())
+        .timeout(Duration::from_secs(10000))
         .send()
         .await;
 
@@ -95,6 +96,7 @@ async fn subscribe_queue_by_id_longpoll(
                     let mut response = HttpResponse::Ok().body(b);
 
                     *response.headers_mut() = headers.clone();
+                    *response.status_mut() = r.status();
 
                     Ok(response)
                 }
@@ -147,6 +149,7 @@ async fn subscribe_queue_longpoll(
         .map(|address| {
             client
                 .request_from(address + prepare_path(&req).as_str(), req.head())
+                .timeout(Duration::from_secs(10000))
                 .send()
         })
         .collect();
@@ -158,6 +161,12 @@ async fn subscribe_queue_longpoll(
         requests = other_requests;
 
         let mut response = first_result.map_err(actix_web::error::ErrorGone)?;
+
+        if !response.status().is_success() {
+            let b = response.body().await.map_err(actix_web::error::ErrorGone)?;
+            return Ok(HttpResponse::build(response.status()).body(b));
+        }
+
         let body = response
             .json::<Vec<Value>>()
             .await
@@ -180,9 +189,15 @@ async fn subscribe_queue_longpoll(
                 Err(_) => break,
             };
 
+            if !response.status().is_success() {
+                let b = response.body().await.map_err(actix_web::error::ErrorGone)?;
+                return Ok(HttpResponse::build(response.status()).body(b));
+            }
+
             requests = other_requests;
 
             let mut response = first_result.map_err(actix_web::error::ErrorGone)?;
+
             let body = response
                 .json::<Vec<Value>>()
                 .await
