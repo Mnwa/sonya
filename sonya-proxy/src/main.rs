@@ -22,9 +22,10 @@ use awc::{
     ws::Frame,
     Client,
 };
-use futures::{future::Either, SinkExt, StreamExt, TryStreamExt};
+use futures::{future::Either, SinkExt, StreamExt, TryFutureExt, TryStreamExt};
 use log::{error, info};
 use serde::Deserialize;
+use serde_json::Value;
 use sonya_meta::message::RequestSequence;
 use sonya_meta::{
     api::extract_any_data_from_query,
@@ -73,25 +74,37 @@ async fn subscribe_queue_by_id_ws(
 async fn subscribe_queue_by_id_longpoll(
     req: HttpRequest,
     registry: web::Data<Addr<RegistryActor>>,
-    service_discovery: web::Data<Addr<ServiceDiscoveryActor>>,
     info: web::Path<(String, String)>,
-    proxies_storage: web::Data<WebSocketProxyClientsStorage>,
-    config: web::Data<Config>,
-) -> Result<HttpResponse, Error> {
+) -> impl Responder {
     let (queue_name, id) = info.into_inner();
-    let receiver = create_receiver(
-        queue_name,
-        id.into(),
-        proxies_storage.as_ref(),
-        config.as_ref(),
-        req.head(),
-        registry.as_ref(),
-        service_discovery.as_ref(),
-        get_sequence_from_req(&req),
-    )
-    .await;
+    let address = get_address(registry.get_ref(), queue_name, id).await;
 
-    logpoll_response_factory(receiver).await
+    let client = Client::default();
+
+    let response = client
+        .request_from(address + prepare_path(&req).as_str(), req.head())
+        .send()
+        .await;
+
+    match response {
+        Ok(mut r) => {
+            let body = r.body().await;
+
+            let headers = r.headers();
+
+            match body {
+                Ok(b) => {
+                    let mut response = HttpResponse::Ok().body(b);
+
+                    *response.headers_mut() = headers.clone();
+
+                    Ok(response)
+                }
+                Err(e) => Err(actix_web::error::ErrorGone(e)),
+            }
+        }
+        Err(e) => Err(actix_web::error::ErrorGone(e)),
+    }
 }
 
 async fn subscribe_queue_ws(
@@ -126,25 +139,29 @@ async fn subscribe_queue_ws(
 async fn subscribe_queue_longpoll(
     req: HttpRequest,
     registry: web::Data<Addr<RegistryActor>>,
-    service_discovery: web::Data<Addr<ServiceDiscoveryActor>>,
-    info: web::Path<(String,)>,
-    proxies_storage: web::Data<WebSocketProxyClientsStorage>,
-    config: web::Data<Config>,
 ) -> Result<HttpResponse, Error> {
-    let queue_name = info.into_inner().0;
-    let receiver = create_receiver(
-        queue_name,
-        None,
-        proxies_storage.as_ref(),
-        config.as_ref(),
-        req.head(),
-        registry.as_ref(),
-        service_discovery.as_ref(),
-        get_sequence_from_req(&req),
-    )
-    .await;
+    let addresses = get_all_addresses(registry.get_ref()).await;
 
-    logpoll_response_factory(receiver).await
+    let client = Client::default();
+
+    let responses = futures::stream::iter(addresses)
+        .then(|address| {
+            client
+                .request_from(address + prepare_path(&req).as_str(), req.head())
+                .send()
+        })
+        .map_err(actix_web::error::ErrorGone)
+        .and_then(|mut r| r.json::<Vec<Value>>().map_err(actix_web::error::ErrorGone))
+        .try_collect::<Vec<Vec<Value>>>()
+        .await?;
+
+    let mut result = Vec::new();
+
+    for response in responses {
+        result.extend_from_slice(&response)
+    }
+
+    Ok(HttpResponse::Ok().json(result))
 }
 
 fn get_sequence_from_req(req: &HttpRequest) -> SequenceQuery {
@@ -202,100 +219,6 @@ async fn create_receiver(
         .await
 }
 
-async fn logpoll_response_factory(
-    receiver: Option<tokio::sync::broadcast::Receiver<WebSocketActorResponse>>,
-) -> Result<HttpResponse, Error> {
-    let mut r = match receiver {
-        Some(r) => r,
-        None => return Err(actix_web::error::ErrorGone("No one available connection")),
-    };
-
-    let stream = async_stream::stream! {
-        while let Ok(WebSocketActorResponse::Message(f)) = r.recv().await {
-            yield f
-        }
-    };
-
-    let response = stream
-        .filter_map(|f: Arc<Frame>| async move {
-            match f.as_ref() {
-                Frame::Binary(b) => Some(b.clone()),
-                Frame::Text(b) => Some(b.clone()),
-                _ => None,
-            }
-        })
-        .boxed()
-        .next()
-        .await;
-
-    match response {
-        Some(b) => Ok(HttpResponse::Ok()
-            .content_type(HeaderValue::from_static("application/json"))
-            .body(b)),
-        None => Err(actix_web::error::ErrorGone("No one available connection")),
-    }
-}
-
-async fn create_queue(
-    req: HttpRequest,
-    registry: web::Data<Addr<RegistryActor>>,
-) -> impl Responder {
-    let addresses = get_all_addresses(registry.get_ref()).await;
-
-    let client = Client::default();
-
-    let requests = addresses.into_iter().map(|address| {
-        client
-            .request_from(address + prepare_path(&req).as_str(), req.head())
-            .send()
-    });
-
-    let result: Result<Vec<_>, _> = futures::future::join_all(requests)
-        .await
-        .into_iter()
-        .collect();
-
-    match result {
-        Ok(_) => Ok(HttpResponse::Ok().json(BaseQueueResponse { success: true })),
-        Err(e) => {
-            error!("create queue proxy error: {:#?}", e);
-            Err(actix_web::error::ErrorGone(
-                "One of shards is not responding",
-            ))
-        }
-    }
-}
-
-async fn delete_from_queue(
-    req: HttpRequest,
-    registry: web::Data<Addr<RegistryActor>>,
-) -> impl Responder {
-    let addresses = get_all_addresses(registry.get_ref()).await;
-
-    let client = Client::default();
-
-    let requests = addresses.into_iter().map(|address| {
-        client
-            .request_from(address + prepare_path(&req).as_str(), req.head())
-            .send()
-    });
-
-    let result: Result<Vec<_>, _> = futures::future::join_all(requests)
-        .await
-        .into_iter()
-        .collect();
-
-    match result {
-        Ok(_) => Ok(HttpResponse::Ok().json(BaseQueueResponse { success: true })),
-        Err(e) => {
-            error!("delete from queue proxy error: {:#?}", e);
-            Err(actix_web::error::ErrorGone(
-                "One of shards is not responding",
-            ))
-        }
-    }
-}
-
 #[derive(Deserialize, Default)]
 struct SequenceQuery {
     sequence: RequestSequence,
@@ -338,7 +261,28 @@ async fn send_to_queue(
     }
 }
 
+async fn create_queue(
+    req: HttpRequest,
+    registry: web::Data<Addr<RegistryActor>>,
+) -> impl Responder {
+    base_diagonal_proxy(req, registry).await
+}
+
+async fn delete_from_queue(
+    req: HttpRequest,
+    registry: web::Data<Addr<RegistryActor>>,
+) -> impl Responder {
+    base_diagonal_proxy(req, registry).await
+}
+
 async fn close_queue(req: HttpRequest, registry: web::Data<Addr<RegistryActor>>) -> impl Responder {
+    base_diagonal_proxy(req, registry).await
+}
+
+async fn base_diagonal_proxy(
+    req: HttpRequest,
+    registry: web::Data<Addr<RegistryActor>>,
+) -> impl Responder {
     let addresses = get_all_addresses(registry.get_ref()).await;
 
     let client = Client::default();
@@ -357,7 +301,7 @@ async fn close_queue(req: HttpRequest, registry: web::Data<Addr<RegistryActor>>)
     match result {
         Ok(_) => Ok(HttpResponse::Ok().json(BaseQueueResponse { success: true })),
         Err(e) => {
-            error!("closing queue proxy error: {:#?}", e);
+            error!("queue proxy error: {:#?}", e);
             Err(actix_web::error::ErrorGone(
                 "One of shards is not responding",
             ))

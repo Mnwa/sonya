@@ -32,13 +32,15 @@ Content-Type: application/json
 If successful, will respond with:
 
 ```json
-{
-  "id": "1",
-  "sequence": 1,
-  "payload": {
-    "message": "hello"
-  }
-}
+[
+  {
+    "id": "1",
+    "sequence": 1,
+    "payload": {
+      "message": "hello"
+    }
+  } 
+]
 ```
 
 **Code examples**
@@ -88,13 +90,15 @@ Content-Type: application/json
 If successful, will respond with:
 
 ```json
-{
-  "id": "1",
-  "sequence": 1,
-  "payload": {
-    "message": "hello"
+[
+  {
+    "id": "1",
+    "sequence": 1,
+    "payload": {
+      "message": "hello"
+    }
   }
-}
+]
 ```
 
 **Code examples**
