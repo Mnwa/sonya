@@ -19,10 +19,9 @@ use actix_web::{
 use actix_web_actors::ws;
 use awc::{
     http::header::{HeaderName, HeaderValue},
-    ws::Frame,
     Client,
 };
-use futures::{future::Either, SinkExt, StreamExt, TryFutureExt, TryStreamExt};
+use futures::{future::Either, SinkExt, TryStreamExt};
 use log::{error, info};
 use serde::Deserialize;
 use serde_json::Value;
@@ -38,7 +37,6 @@ use sonya_meta::{
 };
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    sync::Arc,
     time::Duration,
 };
 
@@ -144,24 +142,57 @@ async fn subscribe_queue_longpoll(
 
     let client = Client::default();
 
-    let responses = futures::stream::iter(addresses)
-        .then(|address| {
+    let mut requests: Vec<_> = addresses
+        .into_iter()
+        .map(|address| {
             client
                 .request_from(address + prepare_path(&req).as_str(), req.head())
                 .send()
         })
-        .map_err(actix_web::error::ErrorGone)
-        .and_then(|mut r| r.json::<Vec<Value>>().map_err(actix_web::error::ErrorGone))
-        .try_collect::<Vec<Vec<Value>>>()
-        .await?;
+        .collect();
 
-    let mut result = Vec::new();
+    let mut results = Vec::new();
 
-    for response in responses {
-        result.extend_from_slice(&response)
+    if !requests.is_empty() {
+        let (first_result, _, other_requests) = futures::future::select_all(requests).await;
+        requests = other_requests;
+
+        let mut response = first_result.map_err(actix_web::error::ErrorGone)?;
+        let body = response
+            .json::<Vec<Value>>()
+            .await
+            .map_err(actix_web::error::ErrorGone)?;
+
+        results.extend(body);
+
+        loop {
+            if requests.is_empty() {
+                break;
+            }
+
+            let (first_result, _, other_requests) = match tokio::time::timeout(
+                Duration::from_secs(1),
+                futures::future::select_all(requests),
+            )
+            .await
+            {
+                Ok(r) => r,
+                Err(_) => break,
+            };
+
+            requests = other_requests;
+
+            let mut response = first_result.map_err(actix_web::error::ErrorGone)?;
+            let body = response
+                .json::<Vec<Value>>()
+                .await
+                .map_err(actix_web::error::ErrorGone)?;
+
+            results.extend(body)
+        }
     }
 
-    Ok(HttpResponse::Ok().json(result))
+    Ok(HttpResponse::Ok().json(results))
 }
 
 fn get_sequence_from_req(req: &HttpRequest) -> SequenceQuery {
