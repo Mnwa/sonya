@@ -56,6 +56,10 @@ where
     }
 
     pub fn delete_queue(&self, queue_name: String, id: String) -> QueueResult<()> {
+        let mut queue_b = self.queue_broadcasts.lock().unwrap();
+        let queue = get_queue_broadcast(queue_name.clone(), &mut queue_b);
+        queue.keys.remove(&id);
+
         let mut batch = Batch::default();
 
         let tree = self.map.open_tree(queue_name.as_bytes())?;
@@ -180,6 +184,9 @@ where
     }
 
     pub fn close_queue(&self, queue_name: String) -> QueueResult<bool> {
+        let mut queue_b = self.queue_broadcasts.lock().unwrap();
+        queue_b.remove(&queue_name);
+
         self.map.drop_tree(queue_name).map_err(QueueError::from)
     }
 

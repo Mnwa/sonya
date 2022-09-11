@@ -2093,7 +2093,7 @@ dependencies = [
 
 [[package]]
 name = "sonya"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "actix",
  "actix-web",
@@ -2113,7 +2113,7 @@ dependencies = [
 
 [[package]]
 name = "sonya-meta"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "actix-web",
  "env_logger",
@@ -2128,7 +2128,7 @@ dependencies = [
 
 [[package]]
 name = "sonya-proxy"
-version = "0.7.0"
+version = "0.8.0"
 dependencies = [
  "actix",
  "actix-web",
