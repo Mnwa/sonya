@@ -89,7 +89,7 @@ where
             preloaded_count: _,
         }) => Err(actix_web::error::ErrorNotFound("Queue Not Found")),
         Err(e) => {
-            error!("websocket subscribe error {}", e);
+            error!("websocket subscribe error {:?}", e);
             Err(actix_web::error::ErrorInternalServerError(
                 "Subscription error",
             ))
@@ -124,7 +124,7 @@ where
             preloaded_count: _,
         }) => Err(actix_web::error::ErrorNotFound("Queue Not Found")),
         Err(e) => {
-            error!("longpoll subscribe error {}", e);
+            error!("longpoll subscribe error {:?}", e);
             Err(actix_web::error::ErrorInternalServerError(
                 "Subscription error",
             ))

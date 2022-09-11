@@ -1,5 +1,6 @@
 use serde::de::{Error, MapAccess, SeqAccess, Visitor};
 use serde::{de, Deserialize, Deserializer, Serialize};
+use std::collections::BTreeSet;
 use std::env::VarError;
 use std::fmt;
 use std::fmt::{Display, Formatter};
@@ -55,7 +56,7 @@ pub fn get_config() -> Config {
     }
 }
 
-fn from_env() -> Result<Config, std::env::VarError> {
+fn from_env() -> Result<Config, VarError> {
     Ok(Config {
         addr: from_env_optional("ADDR")?.map(|a| SocketAddr::from_str(&a).expect("invalid addr")),
         tls: tls_from_env()?,
@@ -67,7 +68,7 @@ fn from_env() -> Result<Config, std::env::VarError> {
     })
 }
 
-fn tls_from_env() -> Result<Option<Tls>, std::env::VarError> {
+fn tls_from_env() -> Result<Option<Tls>, VarError> {
     let private_key = from_env_optional("TLS_PRIVATE_KEY")?;
     let cert = from_env_optional("TLS_CERT")?;
 
@@ -79,7 +80,7 @@ fn tls_from_env() -> Result<Option<Tls>, std::env::VarError> {
         }))
 }
 
-fn secure_from_env() -> Result<Option<Secure>, std::env::VarError> {
+fn secure_from_env() -> Result<Option<Secure>, VarError> {
     let jwt_token_expiration = from_env_optional("SECURE_JWT_EXPIRATION_TIME")?
         .map(|e| e.parse().expect("invalid jwt expiration time"))
         .unwrap_or_else(default_jwt_token_expiration);
@@ -90,7 +91,7 @@ fn secure_from_env() -> Result<Option<Secure>, std::env::VarError> {
     Ok(service_token)
 }
 
-fn garbage_collector_from_env() -> Result<GarbageCollector, std::env::VarError> {
+fn garbage_collector_from_env() -> Result<GarbageCollector, VarError> {
     let gb = from_env_optional("GARBAGE_COLLECTOR_INTERVAL")?
         .map(|interval| GarbageCollector {
             interval: interval.parse().expect("invalid garbage interval"),
@@ -99,7 +100,7 @@ fn garbage_collector_from_env() -> Result<GarbageCollector, std::env::VarError> 
     Ok(gb)
 }
 
-fn websocket_from_env() -> Result<WebSocket, std::env::VarError> {
+fn websocket_from_env() -> Result<WebSocket, VarError> {
     let mut websocket = WebSocket::default();
     if let Some(key) = from_env_optional("WEBSOCKET_KEY")? {
         websocket.key = key;
@@ -110,7 +111,7 @@ fn websocket_from_env() -> Result<WebSocket, std::env::VarError> {
     Ok(websocket)
 }
 
-fn queue_from_env() -> Result<Queue, std::env::VarError> {
+fn queue_from_env() -> Result<Queue, VarError> {
     let default: DefaultQueues = from_env_optional("QUEUE_DEFAULT")?
         .map(|d| {
             d.split(';')
@@ -130,7 +131,7 @@ fn queue_from_env() -> Result<Queue, std::env::VarError> {
     })
 }
 
-fn service_discovery_from_env() -> Result<Option<ServiceDiscovery>, std::env::VarError> {
+fn service_discovery_from_env() -> Result<Option<ServiceDiscovery>, VarError> {
     let service_discovery_type =
         from_env_optional("SERVICE_DISCOVERY_TYPE")?.unwrap_or_else(|| String::from("API"));
     let default_shards: Option<Shards> = from_env_optional("SERVICE_DISCOVERY_DEFAULT_SHARDS")?
@@ -163,7 +164,7 @@ fn service_discovery_from_env() -> Result<Option<ServiceDiscovery>, std::env::Va
     Ok(Some(service_discovery))
 }
 
-fn instance_opts_from_env() -> Result<Option<ServiceDiscoveryInstanceOptions>, std::env::VarError> {
+fn instance_opts_from_env() -> Result<Option<ServiceDiscoveryInstanceOptions>, VarError> {
     let instance_addr = from_env_optional("SERVICE_DISCOVERY_INSTANCE_ADDR")?;
     let instance_id = from_env_optional("SERVICE_DISCOVERY_INSTANCE_id")?;
 
@@ -173,7 +174,7 @@ fn instance_opts_from_env() -> Result<Option<ServiceDiscoveryInstanceOptions>, s
     }))
 }
 
-fn from_env_optional(env_var: &str) -> Result<Option<String>, std::env::VarError> {
+fn from_env_optional(env_var: &str) -> Result<Option<String>, VarError> {
     std::env::var(env_var).map(Some).or_else(|e| match e {
         VarError::NotPresent => Ok(None),
         e => Err(e),
@@ -292,7 +293,7 @@ pub struct Queue {
     pub max_key_updates: Option<usize>,
 }
 
-pub type DefaultQueues = Vec<String>;
+pub type DefaultQueues = BTreeSet<String>;
 
 #[derive(Serialize, Clone, Debug)]
 pub struct GarbageCollector {
