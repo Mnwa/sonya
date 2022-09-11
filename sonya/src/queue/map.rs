@@ -12,6 +12,7 @@ use sonya_meta::config::Queue as QueueOptions;
 use sonya_meta::message::{RequestSequence, RequestSequenceId, SequenceId, UniqId};
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Debug;
+use std::io::ErrorKind;
 use std::sync::Mutex;
 use tokio::sync::broadcast::{channel, Receiver, Sender};
 
@@ -37,7 +38,15 @@ where
                     env!("CARGO_PKG_NAME"),
                     env!("CARGO_PKG_VERSION")
                 ));
-                std::fs::remove_dir_all(&temp).expect("clearing temp dir error");
+
+                let r_result = std::fs::remove_dir_all(&temp);
+
+                if matches!(&r_result, Err(e) if e.kind() != ErrorKind::NotFound) {
+                    r_result.unwrap_or_else(|_| {
+                        panic!("fail to clear temp directory: {:?}", temp.to_str())
+                    });
+                }
+
                 temp
             }
             Some(dp) => dp,
