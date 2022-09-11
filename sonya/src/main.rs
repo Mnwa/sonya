@@ -1,10 +1,10 @@
 use crate::queue::connection::{BroadcastMessage, QueueConnection};
-use crate::queue::map::{Queue, QueueResult};
+use crate::queue::map::{Queue, QueueResult, Subscription};
 use actix_web::middleware::Logger;
 use actix_web::{web, App, Error, HttpRequest, HttpResponse, HttpServer, Responder};
 use actix_web_actors::ws;
 use futures::future::Either;
-use futures::{FutureExt, Stream, StreamExt, TryStreamExt};
+use futures::{FutureExt, StreamExt, TryStreamExt};
 use log::{error, info};
 use serde::{Deserialize, Serialize};
 use sonya_meta::api::extract_any_data_from_query;
@@ -21,24 +21,23 @@ mod service_discovery;
 async fn subscribe_queue_by_id_ws(
     req: HttpRequest,
     stream: web::Payload,
-    srv: web::Data<Queue>,
+    srv: web::Data<Queue<EventMessage>>,
     info: web::Path<(String, String)>,
 ) -> Result<HttpResponse, Error> {
     let (queue_name, id) = info.into_inner();
     let sequence = get_sequence_from_req(&req);
-    let queue_connection =
-        srv.subscribe_queue_by_id::<EventMessage>(queue_name.clone(), id.clone(), sequence);
+    let queue_connection = srv.subscribe_queue_by_id(queue_name.clone(), id.clone(), sequence);
     ws_response_factory(queue_connection, queue_name, Some(id), &req, stream).await
 }
 
 async fn subscribe_queue_by_id_longpoll(
     req: HttpRequest,
-    srv: web::Data<Queue>,
+    srv: web::Data<Queue<EventMessage>>,
     info: web::Path<(String, String)>,
 ) -> Result<HttpResponse, Error> {
     let (queue_name, id) = info.into_inner();
     let sequence = get_sequence_from_req(&req);
-    let queue_connection = srv.subscribe_queue_by_id::<EventMessage>(queue_name, id, sequence);
+    let queue_connection = srv.subscribe_queue_by_id(queue_name, id, sequence);
     longpoll_response_factory(queue_connection).await
 }
 
@@ -50,40 +49,45 @@ fn get_sequence_from_req(req: &HttpRequest) -> RequestSequence {
 async fn subscribe_queue_ws(
     req: HttpRequest,
     stream: web::Payload,
-    srv: web::Data<Queue>,
+    srv: web::Data<Queue<EventMessage>>,
     info: web::Path<(String,)>,
 ) -> Result<HttpResponse, Error> {
     let queue_name = info.into_inner().0;
     let sequence = get_sequence_from_req(&req);
-    let queue_connection = srv.subscribe_queue::<EventMessage>(queue_name.clone(), sequence);
+    let queue_connection = srv.subscribe_queue(queue_name.clone(), sequence);
     ws_response_factory(queue_connection, queue_name, None, &req, stream).await
 }
 
 async fn subscribe_queue_longpoll(
     req: HttpRequest,
-    srv: web::Data<Queue>,
+    srv: web::Data<Queue<EventMessage>>,
     info: web::Path<(String,)>,
 ) -> Result<HttpResponse, Error> {
     let queue_name = info.into_inner().0;
     let sequence = get_sequence_from_req(&req);
-    let queue_connection = srv.subscribe_queue::<EventMessage>(queue_name, sequence);
+    let queue_connection = srv.subscribe_queue(queue_name, sequence);
     longpoll_response_factory(queue_connection).await
 }
 
-async fn ws_response_factory<S, T>(
-    queue: QueueResult<(Option<S>, Option<usize>)>,
+async fn ws_response_factory<T>(
+    queue: QueueResult<Subscription<'static, T>>,
     queue_name: String,
     id: Option<String>,
     req: &HttpRequest,
     stream: web::Payload,
 ) -> Result<HttpResponse, Error>
 where
-    S: 'static + Stream<Item = BroadcastMessage<T>> + Unpin,
     T: 'static + Serialize + UniqId,
 {
     match queue {
-        Ok((Some(q), _)) => ws::start(QueueConnection::new(id, queue_name, q), req, stream),
-        Ok((None, _)) => Err(actix_web::error::ErrorNotFound("Queue Not Found")),
+        Ok(Subscription {
+            stream: Some(q),
+            preloaded_count: _,
+        }) => ws::start(QueueConnection::new(id, queue_name, q), req, stream),
+        Ok(Subscription {
+            stream: None,
+            preloaded_count: _,
+        }) => Err(actix_web::error::ErrorNotFound("Queue Not Found")),
         Err(e) => {
             error!("websocket subscribe error {}", e);
             Err(actix_web::error::ErrorInternalServerError(
@@ -93,15 +97,17 @@ where
     }
 }
 
-async fn longpoll_response_factory<S, T>(
-    queue: QueueResult<(Option<S>, Option<usize>)>,
+async fn longpoll_response_factory<T>(
+    queue: QueueResult<Subscription<'static, T>>,
 ) -> Result<HttpResponse, Error>
 where
-    S: Stream<Item = BroadcastMessage<T>> + Unpin,
     T: 'static + Serialize,
 {
     match queue {
-        Ok((Some(q), prev_len)) => {
+        Ok(Subscription {
+            stream: Some(q),
+            preloaded_count: prev_len,
+        }) => {
             let messages: Result<Vec<_>, _> = q
                 .take(prev_len.unwrap_or(1).max(1))
                 .map(|m| match m {
@@ -113,7 +119,10 @@ where
 
             messages.map(|m| HttpResponse::Ok().json(m))
         }
-        Ok((None, _)) => Err(actix_web::error::ErrorNotFound("Queue Not Found")),
+        Ok(Subscription {
+            stream: None,
+            preloaded_count: _,
+        }) => Err(actix_web::error::ErrorNotFound("Queue Not Found")),
         Err(e) => {
             error!("longpoll subscribe error {}", e);
             Err(actix_web::error::ErrorInternalServerError(
@@ -123,7 +132,10 @@ where
     }
 }
 
-async fn create_queue(srv: web::Data<Queue>, info: web::Path<String>) -> impl Responder {
+async fn create_queue(
+    srv: web::Data<Queue<EventMessage>>,
+    info: web::Path<String>,
+) -> impl Responder {
     let queue_name = info.into_inner();
     match srv.create_queue(queue_name) {
         Err(e) => {
@@ -137,7 +149,7 @@ async fn create_queue(srv: web::Data<Queue>, info: web::Path<String>) -> impl Re
 }
 
 async fn delete_from_queue(
-    srv: web::Data<Queue>,
+    srv: web::Data<Queue<EventMessage>>,
     info: web::Path<(String, String)>,
 ) -> impl Responder {
     let (queue_name, id) = info.into_inner();
@@ -158,7 +170,7 @@ struct SequenceQuery {
 }
 
 async fn send_to_queue(
-    srv: web::Data<Queue>,
+    srv: web::Data<Queue<EventMessage>>,
     info: web::Path<String>,
     message: web::Json<EventMessage>,
 ) -> impl Responder {
@@ -175,7 +187,10 @@ async fn send_to_queue(
     }
 }
 
-async fn close_queue(srv: web::Data<Queue>, info: web::Path<String>) -> impl Responder {
+async fn close_queue(
+    srv: web::Data<Queue<EventMessage>>,
+    info: web::Path<String>,
+) -> impl Responder {
     let queue_name = info.into_inner();
     match srv.close_queue(queue_name) {
         Ok(success) => Ok(HttpResponse::Ok().json(BaseQueueResponse { success })),
@@ -233,7 +248,7 @@ async fn main() -> tokio::io::Result<()> {
         t => panic!("Invalid service discovery type accepted: {}", t.unwrap()),
     };
 
-    let queue = web::Data::new(Queue::new(queue_options).unwrap());
+    let queue = web::Data::new(Queue::<EventMessage>::new(queue_options).unwrap());
 
     let server = HttpServer::new(move || {
         App::new()
