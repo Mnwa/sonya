@@ -37,6 +37,7 @@ where
                     env!("CARGO_PKG_NAME"),
                     env!("CARGO_PKG_VERSION")
                 ));
+                std::fs::remove_dir_all(&temp).expect("clearing temp dir error");
                 temp
             }
             Some(dp) => dp,

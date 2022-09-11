@@ -127,7 +127,7 @@ secure: # optional object. Will checks service token in header or query string i
 queue: # optional object, default {default: [], db_path: "/tmp/sonya"}. Will setup default queues.
   default: # optional array of strings, default empty. Queues with these names will create automatically on queue startup
     - queue_name
-  db_path: # optional string. Path to local storage, if not set, db works from RAM.
+  db_path: # optional string. Path to local storage, if not set, db works from temp directory and will clean data on startup.
   max_key_updates: 10 # optional positive number, default null. Max keys versions which will be possible to ask with sequence query parameter. Set 0 to disable sequences.
 tls: # optional object. Will enable tls.
   private_key: /private/key/path.pem # required string. Path to private key.
@@ -237,7 +237,7 @@ SECURE_JWT_EXPIRATION_TIME=60 #Jwt expiration time
 
 #Queue options
 QUEUE_DEFAULT=test1;test #Default queues splits by ;, queue server only
-QUEUE_DB_PATH=/tmp/sonya # DB data path, queue server only. If not set, db works from RAM.
+QUEUE_DB_PATH=/tmp/sonya # DB data path, queue server only. If not set, db works from temp directory and will clean data on startup.
 QUEUE_MAX_KEY_UPDATES=10 # Max keys versions which will be possible to ask with sequence query parameter.
 
 # Service discovery
