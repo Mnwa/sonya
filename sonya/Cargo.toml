@@ -59,12 +59,6 @@ version = "0.10"
 optional = true
 features = ["tls"]
 
-#[dependencies.sled]
-#version = "0.34"
-#features = ["compression"]
-#git = "https://github.com/spacejam/sled"
-#rev = "e95ec05"
-
 [dependencies.rocksdb]
 version = "0.19"
 default-features = false
