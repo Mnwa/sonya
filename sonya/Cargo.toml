@@ -69,7 +69,7 @@ version = "5"
 
 [dependencies.openssl]
 version = "0.10"
-features = ["vendored"]
+features = ["vendored", "v111"]
 
 [dependencies.sonya-meta]
 version = "0.9"

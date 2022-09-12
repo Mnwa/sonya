@@ -21,4 +21,4 @@ log = "0.4"
 
 [dependencies.openssl]
 version = "0.10"
-features = ["vendored"]
+features = ["vendored", "v111"]
