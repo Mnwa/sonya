@@ -35,4 +35,8 @@ derive_more = "0.99"
 tokio = { version = "1", features = ["sync"] }
 maglev = "0.2"
 
+[dependencies.openssl]
+version = "0.10"
+features = ["vendored"]
+
 sonya-meta = { version = "0.9", path = "../sonya-meta" }

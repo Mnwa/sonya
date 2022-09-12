@@ -67,6 +67,10 @@ features = ["zstd"]
 [dependencies.dashmap]
 version = "5"
 
+[dependencies.openssl]
+version = "0.10"
+features = ["vendored"]
+
 [dependencies.sonya-meta]
 version = "0.9"
 path = "../sonya-meta"
