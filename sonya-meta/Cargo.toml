@@ -14,11 +14,12 @@ serde = "1"
 serde_json = "1"
 serde_yaml = "0.9"
 serde_urlencoded = "0.7"
-actix-web = "4"
 jsonwebtoken = "8"
 env_logger = "0.9"
 log = "0.4"
+rustls = "0.20"
+rustls-pemfile = "1"
 
-[dependencies.openssl]
-version = "0.10"
-features = ["vendored", "v111"]
+[dependencies.actix-web]
+version = "4"
+features = ["rustls"]
