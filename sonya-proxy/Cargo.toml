@@ -39,4 +39,6 @@ maglev = "0.2"
 version = "0.10"
 features = ["vendored"]
 
-sonya-meta = { version = "0.9", path = "../sonya-meta" }
+[dependencies.sonya-meta]
+version = "0.9"
+path = "../sonya-meta"
