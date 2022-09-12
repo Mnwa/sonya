@@ -1,6 +1,6 @@
 [package]
 name = "sonya"
-version = "0.9.0"
+version = "0.9.1"
 edition = "2021"
 description = "Backends for your web queue cluster"
 repository = "https://github.com/Mnwa/sonya"
@@ -63,6 +63,9 @@ features = ["tls"]
 version = "0.19"
 default-features = false
 features = ["zstd"]
+
+[dependencies.dashmap]
+version = "5"
 
 [dependencies.sonya-meta]
 version = "0.9"

@@ -1,4 +1,6 @@
 use crate::queue::connection::BroadcastMessage;
+use dashmap::mapref::one::{Ref, RefMut};
+use dashmap::DashMap;
 use derive_more::{Display, Error, From};
 use futures::stream::BoxStream;
 use log::error;
@@ -10,10 +12,9 @@ use serde::de::DeserializeOwned;
 use serde::Serialize;
 use sonya_meta::config::Queue as QueueOptions;
 use sonya_meta::message::{RequestSequence, RequestSequenceId, SequenceId, UniqId};
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::io::ErrorKind;
-use std::sync::Mutex;
 use tokio::sync::broadcast::{channel, Receiver, Sender};
 
 pub type QueueMap = DBWithThreadMode<MultiThreaded>;
@@ -22,7 +23,7 @@ pub type QueueMap = DBWithThreadMode<MultiThreaded>;
 pub struct Queue<T> {
     map: QueueMap,
     max_key_updates: Option<usize>,
-    queue_meta: Mutex<HashMap<String, QueueBroadcast<T>>>,
+    queue_meta: DashMap<String, QueueBroadcast<T>>,
 }
 
 impl<'a, T> Queue<T>
@@ -78,8 +79,7 @@ where
     }
 
     pub fn delete_queue(&self, queue_name: String, id: String) -> QueueResult<()> {
-        let mut queue_b = self.queue_meta.lock().unwrap();
-        let queue = get_queue_broadcast(queue_name.clone(), &mut queue_b);
+        let queue = get_queue_broadcast(queue_name.clone(), &self.queue_meta);
         queue.keys.remove(&id);
 
         let handle = match self.map.cf_handle(queue_name.as_str()) {
@@ -122,12 +122,10 @@ where
 
         let prev_len = prev_items.as_ref().map(|i| i.len());
 
-        let mut map = self.queue_meta.lock().unwrap();
-        let queue = get_queue_broadcast(queue_name, &mut map);
-        let key_sender = get_key_broadcast(id, queue);
+        let queue = get_queue_broadcast(queue_name, &self.queue_meta);
+        let key_sender = get_key_broadcast(id, &queue);
 
         let recv = key_sender.sender.subscribe();
-        drop(map);
 
         Ok(Subscription {
             stream: Some(prepare_stream(recv, prev_items)),
@@ -149,11 +147,9 @@ where
 
         let prev_len = prev_items.as_ref().map(|i| i.len());
 
-        let mut map = self.queue_meta.lock().unwrap();
-        let queue = get_queue_broadcast(queue_name, &mut map);
+        let queue = get_queue_broadcast(queue_name, &self.queue_meta);
 
         let recv = queue.sender.subscribe();
-        drop(map);
 
         Ok(Subscription {
             stream: Some(prepare_stream(recv, prev_items)),
@@ -209,14 +205,12 @@ where
             self.map.write(batch)?
         }
 
-        let mut map = self.queue_meta.lock().unwrap();
-
-        let queue = get_queue_broadcast(queue_name, &mut map);
+        let queue = get_queue_broadcast(queue_name, &self.queue_meta);
         if let Err(e) = queue.sender.send(value.clone()) {
             error!("broadcast message to queue subscribers error: {}", e)
         }
 
-        let key_sender = get_key_broadcast(value.get_id().to_string(), queue);
+        let key_sender = get_key_broadcast(value.get_id().to_string(), &queue);
         if let Err(e) = key_sender.sender.send(value) {
             error!("broadcast message to key subscribers error: {}", e)
         }
@@ -225,8 +219,7 @@ where
     }
 
     pub fn close_queue(&self, queue_name: String) -> QueueResult<bool> {
-        let mut queue_b = self.queue_meta.lock().unwrap();
-        queue_b.remove(&queue_name);
+        self.queue_meta.remove(&queue_name);
 
         self.map
             .drop_cf(queue_name.as_str())
@@ -239,10 +232,8 @@ where
         key.extend_from_slice(queue_name.as_bytes());
         key.extend_from_slice(id.as_bytes());
 
-        let mut map = self.queue_meta.lock().unwrap();
-
-        let queue = get_queue_broadcast(queue_name.to_string(), &mut map);
-        let key_sender = get_key_broadcast(id.to_string(), queue);
+        let queue = get_queue_broadcast(queue_name.to_string(), &self.queue_meta);
+        let mut key_sender = get_key_broadcast_mut(id.to_string(), &queue);
         let sid = match key_sender.sequence {
             None => match self.map.get(&key)? {
                 None => SequenceId::new(1).unwrap(),
@@ -399,7 +390,7 @@ pub type QueueResult<T> = Result<T, QueueError>;
 #[derive(Debug)]
 struct QueueBroadcast<T> {
     sender: Sender<T>,
-    keys: HashMap<String, KeyBroadcast<T>>,
+    keys: DashMap<String, KeyBroadcast<T>>,
 }
 #[derive(Debug)]
 struct KeyBroadcast<T> {
@@ -407,22 +398,51 @@ struct KeyBroadcast<T> {
     sequence: Option<SequenceId>,
 }
 
+// Potentially may be replaced with consistent entry and downgrade
 fn get_queue_broadcast<T: Clone>(
     queue_name: String,
-    queue_broadcasts: &mut HashMap<String, QueueBroadcast<T>>,
-) -> &mut QueueBroadcast<T> {
+    queue_broadcasts: &DashMap<String, QueueBroadcast<T>>,
+) -> Ref<'_, String, QueueBroadcast<T>> {
+    if !queue_broadcasts.contains_key(&queue_name) {
+        queue_broadcasts.insert(
+            queue_name.clone(),
+            QueueBroadcast {
+                sender: channel(1024).0,
+                keys: Default::default(),
+            },
+        );
+    }
+
     queue_broadcasts
-        .entry(queue_name)
-        .or_insert_with(|| QueueBroadcast {
-            sender: channel(1024).0,
-            keys: Default::default(),
-        })
+        .get(&queue_name)
+        .expect("data race occurred, queue broadcast already dropped")
 }
 
+// Potentially may be replaced with consistent entry and downgrade
 fn get_key_broadcast<T: Clone>(
     id: String,
-    queue_broadcast: &mut QueueBroadcast<T>,
-) -> &mut KeyBroadcast<T> {
+    queue_broadcast: &QueueBroadcast<T>,
+) -> Ref<'_, String, KeyBroadcast<T>> {
+    if !queue_broadcast.keys.contains_key(&id) {
+        queue_broadcast.keys.insert(
+            id.clone(),
+            KeyBroadcast {
+                sender: channel(1024).0,
+                sequence: None,
+            },
+        );
+    }
+
+    queue_broadcast
+        .keys
+        .get(&id)
+        .expect("data race occurred, keys broadcast already dropped")
+}
+
+fn get_key_broadcast_mut<T: Clone>(
+    id: String,
+    queue_broadcast: &QueueBroadcast<T>,
+) -> RefMut<'_, String, KeyBroadcast<T>> {
     queue_broadcast
         .keys
         .entry(id)

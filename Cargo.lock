@@ -707,6 +707,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "dashmap"
+version = "5.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3495912c9c1ccf2e18976439f4443f3fee0fd61f424ff99fde6a66b15ecb448f"
+dependencies = [
+ "cfg-if 1.0.0",
+ "hashbrown",
+ "lock_api",
+ "parking_lot_core",
+]
+
+[[package]]
 name = "derive_more"
 version = "0.99.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2157,12 +2169,13 @@ dependencies = [
 
 [[package]]
 name = "sonya"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "actix",
  "actix-web",
  "actix-web-actors",
  "async-stream",
+ "dashmap",
  "derive_more",
  "etcd-client",
  "futures",
@@ -2177,7 +2190,7 @@ dependencies = [
 
 [[package]]
 name = "sonya-meta"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "actix-web",
  "env_logger",
@@ -2192,7 +2205,7 @@ dependencies = [
 
 [[package]]
 name = "sonya-proxy"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "actix",
  "actix-web",
