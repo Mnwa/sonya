@@ -270,7 +270,7 @@ async fn main() -> tokio::io::Result<()> {
     let result = futures::future::select(rx, {
         match config.tls {
             None => server.bind(address)?,
-            Some(opts) => server.bind_openssl(address, get_options_from_config(opts))?,
+            Some(opts) => server.bind_rustls(address, get_options_from_config(opts))?,
         }
         .run()
     })
