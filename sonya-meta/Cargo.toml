@@ -16,6 +16,9 @@ serde_yaml = "0.9"
 serde_urlencoded = "0.7"
 actix-web = "4"
 jsonwebtoken = "8"
-openssl = { version = "0.10", features = ["v110"] }
 env_logger = "0.9"
 log = "0.4"
+
+[dependencies.openssl]
+version = "0.10"
+features = ["vendored"]
