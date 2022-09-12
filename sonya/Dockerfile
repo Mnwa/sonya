@@ -21,5 +21,4 @@ RUN cargo build --release --bin sonya
 
 FROM debian:buster-slim
 COPY --from=builder /usr/src/web-queue/target/release/sonya /usr/local/bin/sonya
-RUN apt update -y && apt -y install libssl-dev
 CMD ["sonya"]

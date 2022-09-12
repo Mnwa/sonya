@@ -21,5 +21,4 @@ RUN cargo build --release --bin sonya-proxy
 
 FROM debian:buster-slim
 COPY --from=builder /usr/src/web-queue/target/release/sonya-proxy /usr/local/bin/sonya-proxy
-RUN apt update -y && apt -y install pkg-config libssl-dev
 CMD ["sonya-proxy"]

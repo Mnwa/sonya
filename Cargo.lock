@@ -1563,6 +1563,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "openssl-src"
+version = "111.22.0+1.1.1q"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8f31f0d509d1c1ae9cada2f9539ff8f37933831fd5098879e482aa687d659853"
+dependencies = [
+ "cc",
+]
+
+[[package]]
 name = "openssl-sys"
 version = "0.9.74"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1571,6 +1580,7 @@ dependencies = [
  "autocfg",
  "cc",
  "libc",
+ "openssl-src",
  "pkg-config",
  "vcpkg",
 ]
@@ -2169,7 +2179,7 @@ dependencies = [
 
 [[package]]
 name = "sonya"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "actix",
  "actix-web",
@@ -2180,6 +2190,7 @@ dependencies = [
  "etcd-client",
  "futures",
  "log",
+ "openssl",
  "rocksdb",
  "serde",
  "serde_json",
@@ -2190,7 +2201,7 @@ dependencies = [
 
 [[package]]
 name = "sonya-meta"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "actix-web",
  "env_logger",
@@ -2205,7 +2216,7 @@ dependencies = [
 
 [[package]]
 name = "sonya-proxy"
-version = "0.9.1"
+version = "0.9.2"
 dependencies = [
  "actix",
  "actix-web",
@@ -2218,11 +2229,11 @@ dependencies = [
  "log",
  "maglev",
  "num_cpus",
+ "openssl",
  "parking_lot",
  "pin-project-lite",
  "serde",
  "serde_json",
- "sonya-meta",
  "tokio",
  "ws",
 ]
