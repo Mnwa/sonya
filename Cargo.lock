@@ -2234,6 +2234,7 @@ dependencies = [
  "pin-project-lite",
  "serde",
  "serde_json",
+ "sonya-meta",
  "tokio",
  "ws",
 ]
