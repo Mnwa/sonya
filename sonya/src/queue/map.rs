@@ -317,10 +317,7 @@ fn extract_sequences<T: DeserializeOwned>(
                 opts.set_iterate_lower_bound(get_id(id, u64::MIN));
                 opts.set_iterate_upper_bound(get_id(id, u64::MAX));
 
-                Box::new(
-                    map.iterator_cf_opt(cf_handle, opts, IteratorMode::Start)
-                        .take(1),
-                )
+                Box::new(map.iterator_cf_opt(cf_handle, opts, IteratorMode::Start))
             }
         };
 
