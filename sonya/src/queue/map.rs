@@ -5,8 +5,8 @@ use derive_more::{Display, Error, From};
 use futures::stream::BoxStream;
 use log::error;
 use rocksdb::{
-    AsColumnFamilyRef, DBWithThreadMode, Direction, IteratorMode, MultiThreaded, Options,
-    ReadOptions, WriteBatch,
+    AsColumnFamilyRef, DBWithThreadMode, IteratorMode, MultiThreaded, Options, ReadOptions,
+    WriteBatch,
 };
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -88,21 +88,22 @@ where
         };
 
         let mut opts = ReadOptions::default();
-        opts.set_prefix_same_as_start(true);
+        opts.set_iterate_lower_bound(get_id(id.as_str(), u64::MIN));
+        opts.set_iterate_upper_bound(get_id(id.as_str(), u64::MAX));
 
-        let iterator = self.map.iterator_cf_opt(
-            &handle,
-            opts,
-            IteratorMode::From(id.as_bytes(), Direction::Forward),
-        );
+        let batch = self
+            .map
+            .snapshot()
+            .iterator_cf_opt(&handle, opts, IteratorMode::Start)
+            .try_fold::<_, _, Result<_, QueueError>>(
+                WriteBatch::default(),
+                |mut batch, response| {
+                    let (key, _) = response.map_err(QueueError::from)?;
 
-        let mut batch = WriteBatch::default();
-
-        for response in iterator {
-            let (key, _) = response?;
-
-            batch.delete_cf(&handle, key);
-        }
+                    batch.delete_cf(&handle, key);
+                    Ok(batch)
+                },
+            )?;
 
         self.map.write(batch).map_err(QueueError::from)
     }
@@ -185,15 +186,12 @@ where
 
             if let Some(m) = self.max_key_updates {
                 let mut opts = ReadOptions::default();
-                opts.set_prefix_same_as_start(true);
+                opts.set_iterate_lower_bound(get_id(value.get_id(), u64::MIN));
+                opts.set_iterate_upper_bound(get_id(value.get_id(), u64::MAX));
 
                 self.map
                     .snapshot()
-                    .iterator_cf_opt(
-                        &handle,
-                        opts,
-                        IteratorMode::From(value.get_id().as_bytes(), Direction::Reverse),
-                    )
+                    .iterator_cf_opt(&handle, opts, IteratorMode::Start)
                     .skip(m - 1)
                     .try_for_each::<_, QueueResult<()>>(|r| {
                         let (k, _) = r?;
@@ -297,19 +295,22 @@ fn extract_sequences<T: DeserializeOwned>(
 ) -> Result<Vec<T>, QueueError> {
     let mut opts = ReadOptions::default();
 
+    let snapshot = map.snapshot();
+
     let iter: Box<dyn Iterator<Item = Result<(Box<[u8]>, Box<[u8]>), rocksdb::Error>>> =
         match sequence_id {
             RequestSequenceId::Id(s) => {
                 opts.set_iterate_lower_bound(get_id(id, s.get()));
                 opts.set_iterate_upper_bound(get_id(id, u64::MAX));
-                Box::new(map.iterator_cf_opt(cf_handle, opts, IteratorMode::Start))
+                Box::new(snapshot.iterator_cf_opt(cf_handle, opts, IteratorMode::Start))
             }
             RequestSequenceId::Last => {
                 opts.set_iterate_lower_bound(get_id(id, u64::MIN));
                 opts.set_iterate_upper_bound(get_id(id, u64::MAX));
 
                 Box::new(
-                    map.iterator_cf_opt(cf_handle, opts, IteratorMode::End)
+                    snapshot
+                        .iterator_cf_opt(cf_handle, opts, IteratorMode::End)
                         .take(1),
                 )
             }
@@ -317,7 +318,7 @@ fn extract_sequences<T: DeserializeOwned>(
                 opts.set_iterate_lower_bound(get_id(id, u64::MIN));
                 opts.set_iterate_upper_bound(get_id(id, u64::MAX));
 
-                Box::new(map.iterator_cf_opt(cf_handle, opts, IteratorMode::Start))
+                Box::new(snapshot.iterator_cf_opt(cf_handle, opts, IteratorMode::Start))
             }
         };
 
