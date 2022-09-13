@@ -87,25 +87,13 @@ where
             Some(h) => h,
         };
 
-        let mut opts = ReadOptions::default();
-        opts.set_iterate_lower_bound(get_id(id.as_str(), u64::MIN));
-        opts.set_iterate_upper_bound(get_id(id.as_str(), u64::MAX));
-
-        let batch = self
-            .map
-            .snapshot()
-            .iterator_cf_opt(&handle, opts, IteratorMode::Start)
-            .try_fold::<_, _, Result<_, QueueError>>(
-                WriteBatch::default(),
-                |mut batch, response| {
-                    let (key, _) = response.map_err(QueueError::from)?;
-
-                    batch.delete_cf(&handle, key);
-                    Ok(batch)
-                },
-            )?;
-
-        self.map.write(batch).map_err(QueueError::from)
+        self.map
+            .delete_range_cf(
+                &handle,
+                get_id(id.as_str(), u64::MIN),
+                get_id(id.as_str(), u64::MAX),
+            )
+            .map_err(QueueError::from)
     }
 
     pub fn subscribe_queue_by_id(
@@ -294,6 +282,7 @@ fn extract_sequences<T: DeserializeOwned>(
     id: &str,
 ) -> Result<Vec<T>, QueueError> {
     let mut opts = ReadOptions::default();
+    opts.set_ignore_range_deletions(true);
 
     let snapshot = map.snapshot();
 
@@ -337,8 +326,11 @@ fn get_prev_all_items<T: DeserializeOwned + UniqId>(
 ) -> QueueResult<Option<Vec<T>>> {
     sequence
         .map(|sequence_id| {
+            let mut opts = ReadOptions::default();
+            opts.set_ignore_range_deletions(true);
+
             let i = map
-                .full_iterator_cf(cf_handle, IteratorMode::Start)
+                .iterator_cf_opt(cf_handle, opts, IteratorMode::Start)
                 .map(|v| {
                     v.map_err(QueueError::from)
                         .and_then(|(_, v)| serde_json::from_slice(&v).map_err(QueueError::from))
