@@ -1,6 +1,6 @@
 [package]
 name = "sonya-proxy"
-version = "0.9.4"
+version = "0.10.0"
 edition = "2021"
 description = "Proxy for sharding queues of your web queue cluster"
 repository = "https://github.com/Mnwa/sonya"
@@ -36,5 +36,5 @@ tokio = { version = "1", features = ["sync"] }
 maglev = "0.2"
 
 [dependencies.sonya-meta]
-version = "0.9"
+version = "0.10"
 path = "../sonya-meta"
