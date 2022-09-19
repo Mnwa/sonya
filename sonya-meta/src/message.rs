@@ -9,6 +9,10 @@ pub struct EventMessage {
     pub id: String,
     pub sequence: Sequence,
     pub payload: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_deserializing)]
+    #[serde(default)]
+    pub last: Option<bool>,
 }
 
 pub type Sequence = Option<SequenceId>;
@@ -106,10 +110,15 @@ impl UniqId for EventMessage {
     fn set_sequence(&mut self, sequence: SequenceId) -> Sequence {
         self.sequence.replace(sequence)
     }
+
+    fn set_last(&mut self, is_last: bool) {
+        self.last = Some(is_last)
+    }
 }
 
 pub trait UniqId {
     fn get_id(&self) -> &str;
     fn get_sequence(&self) -> Sequence;
     fn set_sequence(&mut self, sequence: SequenceId) -> Sequence;
+    fn set_last(&mut self, is_last: bool);
 }

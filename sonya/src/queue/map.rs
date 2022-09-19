@@ -5,13 +5,13 @@ use derive_more::{Display, Error, From};
 use futures::stream::BoxStream;
 use log::error;
 use rocksdb::{
-    AsColumnFamilyRef, DBWithThreadMode, IteratorMode, MultiThreaded, Options, ReadOptions,
-    WriteBatch,
+    AsColumnFamilyRef, DBCompressionType, DBWithThreadMode, IteratorMode, MultiThreaded, Options,
+    ReadOptions, WriteBatch,
 };
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use sonya_meta::config::Queue as QueueOptions;
-use sonya_meta::message::{RequestSequence, RequestSequenceId, SequenceId, UniqId};
+use sonya_meta::message::{EventMessage, RequestSequence, RequestSequenceId, SequenceId, UniqId};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::io::ErrorKind;
@@ -56,6 +56,10 @@ where
         let mut opts = Options::default();
         opts.create_missing_column_families(true);
         opts.create_if_missing(true);
+        opts.set_compression_type(DBCompressionType::Zstd);
+        opts.set_enable_pipelined_write(true);
+        opts.set_level_compaction_dynamic_level_bytes(true);
+        opts.set_advise_random_on_open(false);
 
         let mut list = config.default;
         list.extend(QueueMap::list_cf(&opts, &path).unwrap_or_default());
@@ -107,7 +111,11 @@ where
             Some(h) => h,
         };
 
-        let prev_items = get_prev_items::<T>(&self.map, &handle, &id, sequence)?;
+        let mut prev_items = get_prev_items::<T>(&self.map, &handle, &id, sequence)?;
+
+        if let Some(last) = prev_items.as_mut().and_then(|vec| vec.last_mut()) {
+            last.set_last(true)
+        }
 
         let prev_len = prev_items.as_ref().map(|i| i.len());
 
@@ -132,7 +140,11 @@ where
             Some(h) => h,
         };
 
-        let prev_items = get_prev_all_items::<T>(&self.map, &handle, sequence)?;
+        let mut prev_items = get_prev_all_items::<T>(&self.map, &handle, sequence)?;
+
+        if let Some(last) = prev_items.as_mut().and_then(|vec| vec.last_mut()) {
+            last.set_last(true)
+        }
 
         let prev_len = prev_items.as_ref().map(|i| i.len());
 
@@ -179,7 +191,7 @@ where
 
                 self.map
                     .snapshot()
-                    .iterator_cf_opt(&handle, opts, IteratorMode::Start)
+                    .iterator_cf_opt(&handle, opts, IteratorMode::End)
                     .skip(m - 1)
                     .try_for_each::<_, QueueResult<()>>(|r| {
                         let (k, _) = r?;
