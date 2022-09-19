@@ -11,7 +11,7 @@ use rocksdb::{
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use sonya_meta::config::Queue as QueueOptions;
-use sonya_meta::message::{EventMessage, RequestSequence, RequestSequenceId, SequenceId, UniqId};
+use sonya_meta::message::{RequestSequence, RequestSequenceId, SequenceId, UniqId};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::io::ErrorKind;
@@ -182,7 +182,7 @@ where
 
             let mut batch = WriteBatch::default();
 
-            batch.put_cf(&handle, id, serde_json::to_vec(&value)?);
+            batch.put_cf(&handle, id, rmp_serde::to_vec(&value)?);
 
             if let Some(m) = self.max_key_updates {
                 let mut opts = ReadOptions::default();
@@ -326,7 +326,7 @@ fn extract_sequences<T: DeserializeOwned>(
     iter.map(|r| {
         r.map(|(_, v)| v)
             .map_err(QueueError::from)
-            .and_then(|v| serde_json::from_slice(&v).map_err(QueueError::from))
+            .and_then(|v| rmp_serde::from_slice(&v).map_err(QueueError::from))
     })
     .collect()
 }
@@ -345,7 +345,7 @@ fn get_prev_all_items<T: DeserializeOwned + UniqId>(
                 .iterator_cf_opt(cf_handle, opts, IteratorMode::Start)
                 .map(|v| {
                     v.map_err(QueueError::from)
-                        .and_then(|(_, v)| serde_json::from_slice(&v).map_err(QueueError::from))
+                        .and_then(|(_, v)| rmp_serde::from_slice(&v).map_err(QueueError::from))
                 });
 
             let i: Box<dyn Iterator<Item = Result<T, QueueError>>> = match sequence_id {
@@ -380,7 +380,8 @@ fn get_prev_all_items<T: DeserializeOwned + UniqId>(
 #[derive(Debug, Display, From, Error)]
 pub enum QueueError {
     Db(rocksdb::Error),
-    Encode(serde_json::Error),
+    Encode(rmp_serde::encode::Error),
+    Decode(rmp_serde::decode::Error),
     #[display(fmt = "sequence must be more then 0")]
     ZeroSequence,
     #[display(fmt = "these queue name is reserved by system")]
