@@ -53,13 +53,7 @@ where
             Some(dp) => dp,
         };
 
-        let mut opts = Options::default();
-        opts.create_missing_column_families(true);
-        opts.create_if_missing(true);
-        opts.set_compression_type(DBCompressionType::Zstd);
-        opts.set_enable_pipelined_write(true);
-        opts.set_level_compaction_dynamic_level_bytes(true);
-        opts.set_advise_random_on_open(false);
+        let opts = create_rocks_opts();
 
         let mut list = config.default;
         list.extend(QueueMap::list_cf(&opts, &path).unwrap_or_default());
@@ -76,8 +70,10 @@ where
     }
 
     pub fn create_queue(&self, queue_name: String) -> QueueResult<()> {
+        let opts = create_rocks_opts();
+
         self.map
-            .create_cf(queue_name, &Options::default())
+            .create_cf(queue_name, &opts)
             .map(|_| ())
             .map_err(QueueError::from)
     }
@@ -467,4 +463,16 @@ impl<'a, T> Default for Subscription<'a, T> {
             preloaded_count: None,
         }
     }
+}
+
+fn create_rocks_opts() -> Options {
+    let mut opts = Options::default();
+    opts.create_missing_column_families(true);
+    opts.create_if_missing(true);
+    opts.set_compression_type(DBCompressionType::Zstd);
+    opts.set_enable_pipelined_write(true);
+    opts.set_level_compaction_dynamic_level_bytes(true);
+    opts.set_advise_random_on_open(false);
+
+    opts
 }
