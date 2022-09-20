@@ -5,8 +5,9 @@ use derive_more::{Display, Error, From};
 use futures::stream::BoxStream;
 use log::info;
 use rocksdb::{
-    AsColumnFamilyRef, DBCompressionType, DBWithThreadMode, Direction, IteratorMode, MultiThreaded,
-    Options, ReadOptions, SliceTransform, WriteBatch,
+    AsColumnFamilyRef, BlockBasedIndexType, BlockBasedOptions, DBCompressionType, DBWithThreadMode,
+    DataBlockIndexType, Direction, IteratorMode, MemtableFactory, MultiThreaded, Options,
+    ReadOptions, SliceTransform, WriteBatch,
 };
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -57,7 +58,7 @@ where
             Some(dp) => dp,
         };
 
-        let opts = create_rocks_opts();
+        let opts = create_rocks_opts(config.max_key_updates.unwrap_or(1000));
 
         let mut list = config.default;
         list.extend(QueueMap::list_cf(&opts, &path).unwrap_or_default());
@@ -74,7 +75,7 @@ where
     }
 
     pub fn create_queue(&self, queue_name: String) -> QueueResult<()> {
-        let opts = create_rocks_opts();
+        let opts = create_rocks_opts(self.max_key_updates.unwrap_or(1000));
 
         self.map
             .create_cf(queue_name, &opts)
@@ -185,7 +186,7 @@ where
             Some(s) => s.get(),
         };
 
-        let sequence_time = time.elapsed() - handle_time;
+        let sequence_time = time.elapsed();
 
         let mut write_time = Duration::default();
         let mut clear_time = Duration::default();
@@ -219,26 +220,32 @@ where
                         Ok(())
                     })?;
 
-                clear_time = time.elapsed() - sequence_time;
+                clear_time = time.elapsed();
             }
 
             self.map.write(batch)?;
 
-            write_time = time.elapsed() - clear_time.max(sequence_time);
+            write_time = time.elapsed();
         }
 
         let _ = queue.sender.send(value.clone());
         let _ = key_sender.sender.send(value);
 
-        let broadcast_time = time.elapsed() - write_time;
+        let broadcast_time = time.elapsed();
 
         info!(
             "handle: {}, sequence: {}, clear: {}, write: {}, broadcast: {}",
             handle_time.as_millis(),
-            sequence_time.as_millis(),
-            clear_time.as_millis(),
-            write_time.as_millis(),
-            broadcast_time.as_millis(),
+            sequence_time.as_millis() - handle_time.as_millis(),
+            clear_time
+                .as_millis()
+                .checked_div(sequence_time.as_millis())
+                .unwrap_or(0),
+            write_time
+                .as_millis()
+                .checked_div(clear_time.max(sequence_time).as_millis())
+                .unwrap_or(0),
+            broadcast_time.as_millis() - write_time.max(sequence_time).as_millis(),
         );
 
         Ok((true, SequenceId::new(sequence)))
@@ -502,12 +509,12 @@ impl<'a, T> Default for Subscription<'a, T> {
     }
 }
 
-fn create_rocks_opts() -> Options {
+fn create_rocks_opts(max_keys: usize) -> Options {
     let mut opts = Options::default();
     opts.create_missing_column_families(true);
     opts.create_if_missing(true);
     opts.set_compression_type(DBCompressionType::Zstd);
-    opts.set_unordered_write(true);
+    opts.set_enable_pipelined_write(true);
     opts.set_level_compaction_dynamic_level_bytes(true);
     opts.set_advise_random_on_open(false);
 
@@ -518,6 +525,24 @@ fn create_rocks_opts() -> Options {
     ));
 
     opts.increase_parallelism(num_cpus::get_physical() as i32);
+
+    let mut factory = BlockBasedOptions::default();
+    factory.set_index_type(BlockBasedIndexType::BinarySearch);
+    factory.set_data_block_index_type(DataBlockIndexType::BinaryAndHash);
+    factory.set_bloom_filter(10., true);
+    factory.set_hybrid_ribbon_filter(10., 2);
+
+    opts.set_block_based_table_factory(&factory);
+
+    let factory = MemtableFactory::HashSkipList {
+        bucket_count: max_keys * 100,
+        height: 12,
+        branching_factor: 4,
+    };
+
+    opts.set_allow_concurrent_memtable_write(false);
+    opts.set_memtable_factory(factory);
+
     opts.optimize_universal_style_compaction(64 * 1024 * 1024 * 1024);
 
     opts
