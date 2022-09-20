@@ -3,7 +3,7 @@ use dashmap::mapref::one::{Ref, RefMut};
 use dashmap::DashMap;
 use derive_more::{Display, Error, From};
 use futures::stream::BoxStream;
-use log::info;
+use log::error;
 use rocksdb::{
     AsColumnFamilyRef, DBCompressionType, DBWithThreadMode, IteratorMode, MultiThreaded, Options,
     ReadOptions, WriteBatch,
@@ -168,9 +168,12 @@ where
 
         let id = value.get_id();
 
+        let queue = get_queue_broadcast(queue_name, &self.queue_meta);
+        let mut key_sender = get_key_broadcast_mut(value.get_id().to_string(), &queue);
+
         let sequence = match value.get_sequence() {
             None => {
-                let id = self.generate_next_id(&queue_name, id)?;
+                let id = self.generate_next_id(&handle, id, &mut key_sender)?;
 
                 value.set_sequence(id);
 
@@ -205,14 +208,16 @@ where
             self.map.write(batch)?
         }
 
-        let queue = get_queue_broadcast(queue_name, &self.queue_meta);
-        if let Err(e) = queue.sender.send(value.clone()) {
-            info!("broadcast message to queue subscribers error: {}", e)
+        if queue.sender.receiver_count() > 0 {
+            if let Err(e) = queue.sender.send(value.clone()) {
+                error!("broadcast message to queue subscribers error: {}", e)
+            }
         }
 
-        let key_sender = get_key_broadcast(value.get_id().to_string(), &queue);
-        if let Err(e) = key_sender.sender.send(value) {
-            info!("broadcast message to key subscribers error: {}", e)
+        if key_sender.sender.receiver_count() > 0 {
+            if let Err(e) = key_sender.sender.send(value) {
+                error!("broadcast message to key subscribers error: {}", e)
+            }
         }
 
         Ok((true, SequenceId::new(sequence)))
@@ -227,28 +232,45 @@ where
             .map(|_| true)
     }
 
-    fn generate_next_id(&self, queue_name: &str, id: &str) -> QueueResult<SequenceId> {
-        let mut key = Vec::from("id_");
-        key.extend_from_slice(queue_name.as_bytes());
-        key.extend_from_slice(id.as_bytes());
-
-        let queue = get_queue_broadcast(queue_name.to_string(), &self.queue_meta);
-        let mut key_sender = get_key_broadcast_mut(id.to_string(), &queue);
+    fn generate_next_id(
+        &self,
+        cf_handle: &impl AsColumnFamilyRef,
+        id: &str,
+        key_sender: &mut KeyBroadcast<T>,
+    ) -> QueueResult<SequenceId> {
         let sid = match key_sender.sequence {
-            None => match self.map.get(&key)? {
-                None => SequenceId::new(1).unwrap(),
-                Some(s) => SequenceId::new(u64::from_be_bytes(
-                    s.try_into().unwrap_or_else(|_| 1u64.to_be_bytes()),
-                ))
-                .unwrap_or_else(|| SequenceId::new(1).unwrap()),
-            },
+            None => {
+                let mut opts = ReadOptions::default();
+                opts.set_ignore_range_deletions(true);
+                opts.set_iterate_lower_bound(get_id(id, u64::MIN));
+                opts.set_iterate_upper_bound(get_id(id, u64::MAX));
+
+                let last: Option<T> = self
+                    .map
+                    .iterator_cf_opt(cf_handle, opts, IteratorMode::End)
+                    .next()
+                    .transpose()
+                    .map_err(QueueError::from)
+                    .and_then(|b| match b {
+                        None => Ok(None),
+                        Some((_, v)) => rmp_serde::from_slice::<T>(&v)
+                            .map_err(QueueError::from)
+                            .map(Some),
+                    })?;
+
+                match last {
+                    None => SequenceId::new(1).unwrap(),
+                    Some(v) => v
+                        .get_sequence()
+                        .unwrap_or_else(|| SequenceId::new(1).unwrap()),
+                }
+            }
             Some(s) => s,
         };
 
         let new_sid = sid.get().saturating_add(1);
 
         key_sender.sequence = SequenceId::new(new_sid);
-        self.map.put(key, new_sid.to_be_bytes())?;
 
         Ok(sid)
     }
