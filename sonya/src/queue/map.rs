@@ -3,7 +3,7 @@ use dashmap::mapref::one::{Ref, RefMut};
 use dashmap::DashMap;
 use derive_more::{Display, Error, From};
 use futures::stream::BoxStream;
-use log::error;
+use log::info;
 use rocksdb::{
     AsColumnFamilyRef, DBCompressionType, DBWithThreadMode, IteratorMode, MultiThreaded, Options,
     ReadOptions, WriteBatch,
@@ -207,12 +207,12 @@ where
 
         let queue = get_queue_broadcast(queue_name, &self.queue_meta);
         if let Err(e) = queue.sender.send(value.clone()) {
-            error!("broadcast message to queue subscribers error: {}", e)
+            info!("broadcast message to queue subscribers error: {}", e)
         }
 
         let key_sender = get_key_broadcast(value.get_id().to_string(), &queue);
         if let Err(e) = key_sender.sender.send(value) {
-            error!("broadcast message to key subscribers error: {}", e)
+            info!("broadcast message to key subscribers error: {}", e)
         }
 
         Ok((true, SequenceId::new(sequence)))
