@@ -345,7 +345,10 @@ async fn base_diagonal_proxy(
         .collect();
 
     match result {
-        Ok(_) => Ok(HttpResponse::Ok().json(BaseQueueResponse { success: true })),
+        Ok(_) => Ok(HttpResponse::Ok().json(BaseQueueResponse {
+            success: true,
+            sequence_id: None,
+        })),
         Err(e) => {
             error!("queue proxy error: {:#?}", e);
             Err(actix_web::error::ErrorGone(
@@ -494,7 +497,10 @@ async fn service_registry_api(
 ) -> impl Responder {
     let mut updater = RegistryApiUpdater::clone(&updater);
     match updater.0.send(list.into_inner()).await {
-        Ok(_) => Ok(HttpResponse::Ok().json(BaseQueueResponse { success: true })),
+        Ok(_) => Ok(HttpResponse::Ok().json(BaseQueueResponse {
+            success: true,
+            sequence_id: None,
+        })),
         Err(_) => Err(actix_web::error::ErrorInternalServerError(
             "Service discovery was broken",
         )),

@@ -144,7 +144,10 @@ async fn create_queue(
                 "Queue was not created",
             ))
         }
-        Ok(_) => Ok(HttpResponse::Created().json(BaseQueueResponse { success: true })),
+        Ok(_) => Ok(HttpResponse::Created().json(BaseQueueResponse {
+            success: true,
+            sequence_id: None,
+        })),
     }
 }
 
@@ -160,7 +163,10 @@ async fn delete_from_queue(
                 "Queue was not created",
             ))
         }
-        Ok(_) => Ok(HttpResponse::Ok().json(BaseQueueResponse { success: true })),
+        Ok(_) => Ok(HttpResponse::Ok().json(BaseQueueResponse {
+            success: true,
+            sequence_id: None,
+        })),
     }
 }
 
@@ -183,7 +189,10 @@ async fn send_to_queue(
                 "Message was not sent",
             ))
         }
-        Ok(success) => Ok(HttpResponse::Ok().json(BaseQueueResponse { success })),
+        Ok((success, sequence_id)) => Ok(HttpResponse::Ok().json(BaseQueueResponse {
+            success,
+            sequence_id,
+        })),
     }
 }
 
@@ -193,7 +202,10 @@ async fn close_queue(
 ) -> impl Responder {
     let queue_name = info.into_inner();
     match srv.close_queue(queue_name) {
-        Ok(success) => Ok(HttpResponse::Ok().json(BaseQueueResponse { success })),
+        Ok(success) => Ok(HttpResponse::Ok().json(BaseQueueResponse {
+            success,
+            sequence_id: None,
+        })),
         Err(e) => {
             error!("close queue error {}", e);
             Err(actix_web::error::ErrorInternalServerError(

@@ -154,9 +154,13 @@ where
         })
     }
 
-    pub fn send_to_queue(&self, queue_name: String, mut value: T) -> QueueResult<bool> {
+    pub fn send_to_queue(
+        &self,
+        queue_name: String,
+        mut value: T,
+    ) -> QueueResult<(bool, Option<SequenceId>)> {
         let handle = match self.map.cf_handle(queue_name.as_str()) {
-            None => return Ok(false),
+            None => return Ok((false, None)),
             Some(h) => h,
         };
 
@@ -209,7 +213,7 @@ where
             error!("broadcast message to key subscribers error: {}", e)
         }
 
-        Ok(true)
+        Ok((true, SequenceId::new(sequence)))
     }
 
     pub fn close_queue(&self, queue_name: String) -> QueueResult<bool> {

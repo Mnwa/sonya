@@ -6,14 +6,21 @@ Send a message to one of the shards of SonyaWQ.
 
 **Method** : `POST`
 
-**Body** : 
+**Body** :
+
 ```json
 {
   "id": "",
+  "sequence_id": 1,
   "payload": {}
 }
 ```
-Where `id` is any `string` and `payload` is any `object`.
+
+* `id` is any `string`
+* `payload` available type in json
+* `sequence_id` is an **optional unique** integer. Not unique sequence will rewrite previous message.
+
+[More about sequence.](../../sequence.md)
 
 **Headers**
 ```text
@@ -44,7 +51,8 @@ If successful, will respond with:
 
 ```json
 {
-  "success": true
+  "success": true,
+  "sequence_id": 1
 }
 ```
 
