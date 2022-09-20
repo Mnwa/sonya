@@ -99,26 +99,40 @@ impl Display for RequestSequenceId {
     }
 }
 
-impl UniqId for EventMessage {
-    fn get_id(&self) -> &str {
-        &self.id
-    }
+impl SequenceEvent for EventMessage {
     fn get_sequence(&self) -> Sequence {
         self.sequence
     }
-
     fn set_sequence(&mut self, sequence: SequenceId) -> Sequence {
         self.sequence.replace(sequence)
     }
+}
 
+impl UniqIdEvent for EventMessage {
+    fn get_id(&self) -> &str {
+        &self.id
+    }
+}
+
+impl LastEvent for EventMessage {
     fn set_last(&mut self, is_last: bool) {
         self.last = Some(is_last)
     }
 }
 
-pub trait UniqId {
-    fn get_id(&self) -> &str;
+impl Event for EventMessage {}
+
+pub trait Event: SequenceEvent + UniqIdEvent + LastEvent {}
+
+pub trait SequenceEvent {
     fn get_sequence(&self) -> Sequence;
     fn set_sequence(&mut self, sequence: SequenceId) -> Sequence;
+}
+
+pub trait UniqIdEvent {
+    fn get_id(&self) -> &str;
+}
+
+pub trait LastEvent {
     fn set_last(&mut self, is_last: bool);
 }

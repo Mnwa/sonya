@@ -9,7 +9,7 @@ use log::{error, info};
 use serde::{Deserialize, Serialize};
 use sonya_meta::api::extract_any_data_from_query;
 use sonya_meta::config::{get_config, ServiceDiscovery, ServiceDiscoveryInstanceOptions};
-use sonya_meta::message::{EventMessage, RequestSequence, UniqId};
+use sonya_meta::message::{EventMessage, RequestSequence};
 use sonya_meta::queue_scope_factory;
 use sonya_meta::response::BaseQueueResponse;
 use sonya_meta::tls::get_options_from_config;
@@ -77,7 +77,7 @@ async fn ws_response_factory<T>(
     stream: web::Payload,
 ) -> Result<HttpResponse, Error>
 where
-    T: 'static + Serialize + UniqId,
+    T: 'static + Serialize,
 {
     match queue {
         Ok(Subscription {

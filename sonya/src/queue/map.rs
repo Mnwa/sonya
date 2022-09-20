@@ -11,7 +11,9 @@ use rocksdb::{
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use sonya_meta::config::Queue as QueueOptions;
-use sonya_meta::message::{RequestSequence, RequestSequenceId, SequenceId, UniqId};
+use sonya_meta::message::{
+    Event, RequestSequence, RequestSequenceId, SequenceEvent, SequenceId, UniqIdEvent,
+};
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::io::ErrorKind;
@@ -28,7 +30,7 @@ pub struct Queue<T> {
 
 impl<'a, T> Queue<T>
 where
-    T: 'a + Send + DeserializeOwned + Serialize + Debug + UniqId + Clone,
+    T: 'a + Send + DeserializeOwned + Serialize + Debug + Event + Clone,
 {
     pub fn new(config: QueueOptions) -> QueueResult<Self> {
         let path = match config.db_path {
@@ -331,7 +333,7 @@ fn extract_sequences<T: DeserializeOwned>(
     .collect()
 }
 
-fn get_prev_all_items<T: DeserializeOwned + UniqId>(
+fn get_prev_all_items<T: DeserializeOwned + SequenceEvent + UniqIdEvent>(
     map: &QueueMap,
     cf_handle: &impl AsColumnFamilyRef,
     sequence: RequestSequence,
