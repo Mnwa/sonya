@@ -517,6 +517,9 @@ fn create_rocks_opts() -> Options {
         Some(is_valid_domain),
     ));
 
+    opts.increase_parallelism(num_cpus::get_physical() as i32);
+    opts.optimize_universal_style_compaction(64 * 1024 * 1024 * 1024);
+
     opts
 }
 

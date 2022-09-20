@@ -2147,6 +2147,7 @@ dependencies = [
  "etcd-client",
  "futures",
  "log",
+ "num_cpus",
  "rmp-serde",
  "rocksdb",
  "serde",

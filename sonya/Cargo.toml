@@ -70,6 +70,9 @@ version = "5"
 [dependencies.rmp-serde]
 version = "1"
 
+[dependencies.num_cpus]
+version = "1"
+
 [dependencies.sonya-meta]
 version = "0.10"
 path = "../sonya-meta"
