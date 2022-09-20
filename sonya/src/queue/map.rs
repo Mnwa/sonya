@@ -238,7 +238,7 @@ where
         id: &str,
         key_sender: &mut KeyBroadcast<T>,
     ) -> QueueResult<SequenceId> {
-        let sid = match key_sender.sequence {
+        let sid: SequenceId = match key_sender.sequence {
             None => {
                 let mut opts = ReadOptions::default();
                 opts.set_ignore_range_deletions(true);
