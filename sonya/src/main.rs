@@ -26,7 +26,12 @@ async fn subscribe_queue_by_id_ws(
 ) -> Result<HttpResponse, Error> {
     let (queue_name, id) = info.into_inner();
     let sequence = get_sequence_from_req(&req);
-    let queue_connection = srv.subscribe_queue_by_id(queue_name.clone(), id.clone(), sequence);
+    let queue_connection = web::block({
+        let queue_name = queue_name.clone();
+        let id = id.clone();
+        move || srv.subscribe_queue_by_id(queue_name, id, sequence)
+    })
+    .await?;
     ws_response_factory(queue_connection, queue_name, Some(id), &req, stream).await
 }
 
@@ -37,7 +42,8 @@ async fn subscribe_queue_by_id_longpoll(
 ) -> Result<HttpResponse, Error> {
     let (queue_name, id) = info.into_inner();
     let sequence = get_sequence_from_req(&req);
-    let queue_connection = srv.subscribe_queue_by_id(queue_name, id, sequence);
+    let queue_connection =
+        web::block(move || srv.subscribe_queue_by_id(queue_name, id, sequence)).await?;
     longpoll_response_factory(queue_connection).await
 }
 
@@ -54,7 +60,11 @@ async fn subscribe_queue_ws(
 ) -> Result<HttpResponse, Error> {
     let queue_name = info.into_inner().0;
     let sequence = get_sequence_from_req(&req);
-    let queue_connection = srv.subscribe_queue(queue_name.clone(), sequence);
+    let queue_connection = web::block({
+        let queue_name = queue_name.clone();
+        move || srv.subscribe_queue(queue_name, sequence)
+    })
+    .await?;
     ws_response_factory(queue_connection, queue_name, None, &req, stream).await
 }
 
@@ -65,7 +75,7 @@ async fn subscribe_queue_longpoll(
 ) -> Result<HttpResponse, Error> {
     let queue_name = info.into_inner().0;
     let sequence = get_sequence_from_req(&req);
-    let queue_connection = srv.subscribe_queue(queue_name, sequence);
+    let queue_connection = web::block(move || srv.subscribe_queue(queue_name, sequence)).await?;
     longpoll_response_factory(queue_connection).await
 }
 
@@ -137,7 +147,7 @@ async fn create_queue(
     info: web::Path<String>,
 ) -> impl Responder {
     let queue_name = info.into_inner();
-    match srv.create_queue(queue_name) {
+    match web::block(move || srv.create_queue(queue_name)).await? {
         Err(e) => {
             error!("creating queue error {}", e);
             Err(actix_web::error::ErrorInternalServerError(
@@ -156,7 +166,7 @@ async fn delete_from_queue(
     info: web::Path<(String, String)>,
 ) -> impl Responder {
     let (queue_name, id) = info.into_inner();
-    match srv.delete_queue(queue_name, id) {
+    match web::block(move || srv.delete_queue(queue_name, id)).await? {
         Err(e) => {
             error!("deleting queue error {}", e);
             Err(actix_web::error::ErrorInternalServerError(
@@ -182,7 +192,8 @@ async fn send_to_queue(
 ) -> impl Responder {
     let queue_name = info.into_inner();
     let message = message.into_inner();
-    match srv.send_to_queue(queue_name, message) {
+
+    match web::block(move || srv.send_to_queue(queue_name, message)).await? {
         Err(e) => {
             error!("sending message error {}", e);
             Err(actix_web::error::ErrorInternalServerError(
@@ -201,7 +212,7 @@ async fn close_queue(
     info: web::Path<String>,
 ) -> impl Responder {
     let queue_name = info.into_inner();
-    match srv.close_queue(queue_name) {
+    match web::block(move || srv.close_queue(queue_name)).await? {
         Ok(success) => Ok(HttpResponse::Ok().json(BaseQueueResponse {
             success,
             sequence_id: None,
