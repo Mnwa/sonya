@@ -1,12 +1,12 @@
 use crate::queue::connection::BroadcastMessage;
-use dashmap::mapref::one::{Ref, RefMut};
+use dashmap::mapref::one::Ref;
 use dashmap::DashMap;
 use derive_more::{Display, Error, From};
 use futures::stream::BoxStream;
-use log::error;
+use log::info;
 use rocksdb::{
-    AsColumnFamilyRef, DBCompressionType, DBWithThreadMode, IteratorMode, MultiThreaded, Options,
-    ReadOptions, WriteBatch,
+    AsColumnFamilyRef, DBCompressionType, DBWithThreadMode, Direction, IteratorMode, MultiThreaded,
+    Options, ReadOptions, SliceTransform, WriteBatch,
 };
 use serde::de::DeserializeOwned;
 use serde::Serialize;
@@ -17,6 +17,8 @@ use sonya_meta::message::{
 use std::collections::BTreeMap;
 use std::fmt::Debug;
 use std::io::ErrorKind;
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 use tokio::sync::broadcast::{channel, Receiver, Sender};
 
 pub type QueueMap = DBWithThreadMode<MultiThreaded>;
@@ -118,7 +120,7 @@ where
         let prev_len = prev_items.as_ref().map(|i| i.len());
 
         let queue = get_queue_broadcast(queue_name, &self.queue_meta);
-        let key_sender = get_key_broadcast(id, &queue);
+        let key_sender = get_key_broadcast(&self.map, &handle, &id, &queue)?;
 
         let recv = key_sender.sender.subscribe();
 
@@ -161,19 +163,20 @@ where
         queue_name: String,
         mut value: T,
     ) -> QueueResult<(bool, Option<SequenceId>)> {
+        let time = Instant::now();
         let handle = match self.map.cf_handle(queue_name.as_str()) {
             None => return Ok((false, None)),
             Some(h) => h,
         };
 
-        let id = value.get_id();
+        let handle_time = time.elapsed();
 
         let queue = get_queue_broadcast(queue_name, &self.queue_meta);
-        let mut key_sender = get_key_broadcast_mut(value.get_id().to_string(), &queue);
+        let key_sender = get_key_broadcast(&self.map, &handle, value.get_id(), &queue)?;
 
         let sequence = match value.get_sequence() {
             None => {
-                let id = self.generate_next_id(&handle, id, &mut key_sender)?;
+                let id = self.generate_next_id(&key_sender);
 
                 value.set_sequence(id);
 
@@ -181,6 +184,11 @@ where
             }
             Some(s) => s.get(),
         };
+
+        let sequence_time = time.elapsed() - handle_time;
+
+        let mut write_time = Duration::default();
+        let mut clear_time = Duration::default();
 
         if !matches!(self.max_key_updates, Some(0)) {
             let id = get_id(value.get_id(), sequence);
@@ -190,35 +198,48 @@ where
             batch.put_cf(&handle, id, rmp_serde::to_vec(&value)?);
 
             if let Some(m) = self.max_key_updates {
+                let min_id = get_id(value.get_id(), u64::MIN);
+                let max_id = get_id(value.get_id(), sequence);
+
                 let mut opts = ReadOptions::default();
-                opts.set_iterate_lower_bound(get_id(value.get_id(), u64::MIN));
-                opts.set_iterate_upper_bound(get_id(value.get_id(), u64::MAX));
+                opts.set_iterate_lower_bound(min_id);
+                opts.set_prefix_same_as_start(true);
 
                 self.map
                     .snapshot()
-                    .iterator_cf_opt(&handle, opts, IteratorMode::End)
+                    .iterator_cf_opt(
+                        &handle,
+                        opts,
+                        IteratorMode::From(&max_id, Direction::Reverse),
+                    )
                     .skip(m - 1)
                     .try_for_each::<_, QueueResult<()>>(|r| {
                         let (k, _) = r?;
                         batch.delete_cf(&handle, k);
                         Ok(())
                     })?;
+
+                clear_time = time.elapsed() - sequence_time;
             }
 
-            self.map.write(batch)?
+            self.map.write(batch)?;
+
+            write_time = time.elapsed() - clear_time.max(sequence_time);
         }
 
-        if queue.sender.receiver_count() > 0 {
-            if let Err(e) = queue.sender.send(value.clone()) {
-                error!("broadcast message to queue subscribers error: {}", e)
-            }
-        }
+        let _ = queue.sender.send(value.clone());
+        let _ = key_sender.sender.send(value);
 
-        if key_sender.sender.receiver_count() > 0 {
-            if let Err(e) = key_sender.sender.send(value) {
-                error!("broadcast message to key subscribers error: {}", e)
-            }
-        }
+        let broadcast_time = time.elapsed() - write_time;
+
+        info!(
+            "handle: {}, sequence: {}, clear: {}, write: {}, broadcast: {}",
+            handle_time.as_millis(),
+            sequence_time.as_millis(),
+            clear_time.as_millis(),
+            write_time.as_millis(),
+            broadcast_time.as_millis(),
+        );
 
         Ok((true, SequenceId::new(sequence)))
     }
@@ -232,47 +253,8 @@ where
             .map(|_| true)
     }
 
-    fn generate_next_id(
-        &self,
-        cf_handle: &impl AsColumnFamilyRef,
-        id: &str,
-        key_sender: &mut KeyBroadcast<T>,
-    ) -> QueueResult<SequenceId> {
-        let sid: SequenceId = match key_sender.sequence {
-            None => {
-                let mut opts = ReadOptions::default();
-                opts.set_ignore_range_deletions(true);
-                opts.set_iterate_lower_bound(get_id(id, u64::MIN));
-                opts.set_iterate_upper_bound(get_id(id, u64::MAX));
-
-                let last: Option<T> = self
-                    .map
-                    .iterator_cf_opt(cf_handle, opts, IteratorMode::End)
-                    .next()
-                    .transpose()
-                    .map_err(QueueError::from)
-                    .and_then(|b| match b {
-                        None => Ok(None),
-                        Some((_, v)) => rmp_serde::from_slice::<T>(&v)
-                            .map_err(QueueError::from)
-                            .map(Some),
-                    })?;
-
-                match last {
-                    None => SequenceId::new(1).unwrap(),
-                    Some(v) => v
-                        .get_sequence()
-                        .unwrap_or_else(|| SequenceId::new(1).unwrap()),
-                }
-            }
-            Some(s) => s,
-        };
-
-        let new_sid = sid.get().saturating_add(1);
-
-        key_sender.sequence = SequenceId::new(new_sid);
-
-        Ok(sid)
+    fn generate_next_id(&self, key_sender: &KeyBroadcast<T>) -> SequenceId {
+        SequenceId::new(key_sender.sequence.fetch_add(1, Ordering::SeqCst)).unwrap()
     }
 }
 
@@ -294,10 +276,11 @@ fn prepare_stream<'a, T: 'a + DeserializeOwned + Send + Clone>(
 }
 
 fn get_id(id: &str, sequence: u64) -> Vec<u8> {
-    let mut id = Vec::from(id.as_bytes());
-    id.extend_from_slice(&sequence.to_be_bytes());
+    let mut key = Vec::with_capacity(id.as_bytes().len() + std::mem::size_of::<SequenceId>());
+    key.extend_from_slice(id.as_bytes());
+    key.extend_from_slice(&sequence.to_be_bytes());
 
-    id
+    key
 }
 
 fn get_prev_items<T: DeserializeOwned>(
@@ -318,32 +301,47 @@ fn extract_sequences<T: DeserializeOwned>(
     id: &str,
 ) -> Result<Vec<T>, QueueError> {
     let mut opts = ReadOptions::default();
+
+    let min_id = get_id(id, u64::MIN);
+    let max_id = get_id(id, u64::MAX);
+
     opts.set_ignore_range_deletions(true);
+    opts.set_prefix_same_as_start(true);
 
     let snapshot = map.snapshot();
 
     let iter: Box<dyn Iterator<Item = Result<(Box<[u8]>, Box<[u8]>), rocksdb::Error>>> =
         match sequence_id {
             RequestSequenceId::Id(s) => {
-                opts.set_iterate_lower_bound(get_id(id, s.get()));
-                opts.set_iterate_upper_bound(get_id(id, u64::MAX));
-                Box::new(snapshot.iterator_cf_opt(cf_handle, opts, IteratorMode::Start))
+                opts.set_iterate_upper_bound(max_id.clone());
+
+                Box::new(snapshot.iterator_cf_opt(
+                    cf_handle,
+                    opts,
+                    IteratorMode::From(&get_id(id, s.get()), Direction::Forward),
+                ))
             }
             RequestSequenceId::Last => {
-                opts.set_iterate_lower_bound(get_id(id, u64::MIN));
-                opts.set_iterate_upper_bound(get_id(id, u64::MAX));
+                opts.set_iterate_lower_bound(min_id.clone());
 
                 Box::new(
                     snapshot
-                        .iterator_cf_opt(cf_handle, opts, IteratorMode::End)
+                        .iterator_cf_opt(
+                            cf_handle,
+                            opts,
+                            IteratorMode::From(&max_id, Direction::Reverse),
+                        )
                         .take(1),
                 )
             }
             RequestSequenceId::First => {
-                opts.set_iterate_lower_bound(get_id(id, u64::MIN));
-                opts.set_iterate_upper_bound(get_id(id, u64::MAX));
+                opts.set_iterate_upper_bound(max_id.clone());
 
-                Box::new(snapshot.iterator_cf_opt(cf_handle, opts, IteratorMode::Start))
+                Box::new(snapshot.iterator_cf_opt(
+                    cf_handle,
+                    opts,
+                    IteratorMode::From(&min_id, Direction::Forward),
+                ))
             }
         };
 
@@ -422,7 +420,7 @@ struct QueueBroadcast<T> {
 #[derive(Debug)]
 struct KeyBroadcast<T> {
     sender: Sender<T>,
-    sequence: Option<SequenceId>,
+    sequence: AtomicU64,
 }
 
 // Potentially may be replaced with consistent entry and downgrade
@@ -446,37 +444,48 @@ fn get_queue_broadcast<T: Clone>(
 }
 
 // Potentially may be replaced with consistent entry and downgrade
-fn get_key_broadcast<T: Clone>(
-    id: String,
-    queue_broadcast: &QueueBroadcast<T>,
-) -> Ref<'_, String, KeyBroadcast<T>> {
-    if !queue_broadcast.keys.contains_key(&id) {
+fn get_key_broadcast<'a, T: Clone + SequenceEvent + DeserializeOwned>(
+    map: &'a QueueMap,
+    cf_handle: &'a impl AsColumnFamilyRef,
+    id: &str,
+    queue_broadcast: &'a QueueBroadcast<T>,
+) -> QueueResult<Ref<'a, String, KeyBroadcast<T>>> {
+    if !queue_broadcast.keys.contains_key(id) {
+        let mut opts = ReadOptions::default();
+        opts.set_ignore_range_deletions(true);
+        opts.set_iterate_lower_bound(get_id(id, u64::MIN));
+        opts.set_iterate_upper_bound(get_id(id, u64::MAX));
+
+        let last: Option<T> = map
+            .iterator_cf_opt(cf_handle, opts, IteratorMode::End)
+            .next()
+            .transpose()
+            .map_err(QueueError::from)
+            .and_then(|b| match b {
+                None => Ok(None),
+                Some((_, v)) => rmp_serde::from_slice::<T>(&v)
+                    .map_err(QueueError::from)
+                    .map(Some),
+            })?;
+
+        let sequence = last
+            .and_then(|v| v.get_sequence())
+            .map(|s| AtomicU64::new(s.get()))
+            .unwrap_or_else(|| AtomicU64::new(1));
+
         queue_broadcast.keys.insert(
-            id.clone(),
+            id.to_string(),
             KeyBroadcast {
                 sender: channel(1024).0,
-                sequence: None,
+                sequence,
             },
         );
     }
 
-    queue_broadcast
+    Ok(queue_broadcast
         .keys
-        .get(&id)
-        .expect("data race occurred, keys broadcast already dropped")
-}
-
-fn get_key_broadcast_mut<T: Clone>(
-    id: String,
-    queue_broadcast: &QueueBroadcast<T>,
-) -> RefMut<'_, String, KeyBroadcast<T>> {
-    queue_broadcast
-        .keys
-        .entry(id)
-        .or_insert_with(|| KeyBroadcast {
-            sender: channel(1024).0,
-            sequence: None,
-        })
+        .get(id)
+        .expect("data race occurred, keys broadcast already dropped"))
 }
 
 pub struct Subscription<'a, T> {
@@ -498,9 +507,23 @@ fn create_rocks_opts() -> Options {
     opts.create_missing_column_families(true);
     opts.create_if_missing(true);
     opts.set_compression_type(DBCompressionType::Zstd);
-    opts.set_enable_pipelined_write(true);
+    opts.set_unordered_write(true);
     opts.set_level_compaction_dynamic_level_bytes(true);
     opts.set_advise_random_on_open(false);
 
+    opts.set_prefix_extractor(SliceTransform::create(
+        "events_prefix_extractor",
+        prefix_extractor,
+        Some(is_valid_domain),
+    ));
+
     opts
+}
+
+fn prefix_extractor(prefix: &[u8]) -> &[u8] {
+    &prefix[0..prefix.len() - 1 - std::mem::size_of::<SequenceId>()]
+}
+
+fn is_valid_domain(prefix: &[u8]) -> bool {
+    prefix.len() > std::mem::size_of::<SequenceId>()
 }
