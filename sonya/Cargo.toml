@@ -1,6 +1,6 @@
 [package]
 name = "sonya"
-version = "0.10.1"
+version = "0.10.2"
 edition = "2021"
 description = "Backends for your web queue cluster"
 repository = "https://github.com/Mnwa/sonya"
