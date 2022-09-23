@@ -3,13 +3,6 @@ use dashmap::mapref::one::Ref;
 use dashmap::DashMap;
 use derive_more::{Display, Error, From};
 use futures::stream::BoxStream;
-use futures::{SinkExt, TryFutureExt, TryStreamExt};
-use log::{error, info};
-use rocksdb::{
-    AsColumnFamilyRef, BlockBasedIndexType, BlockBasedOptions, DBCompressionType,
-    DataBlockIndexType, Direction, IteratorMode, MemtableFactory, Options, ReadOptions,
-    SliceTransform,
-};
 use serde::de::DeserializeOwned;
 use serde::Serialize;
 use sled::{Batch, IVec, Tree};
@@ -19,9 +12,6 @@ use sonya_meta::message::{
 };
 use std::collections::BTreeMap;
 use std::fmt::Debug;
-use std::io::ErrorKind;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{Duration, Instant};
 use tokio::sync::broadcast::{channel, Receiver, Sender};
 
 pub type QueueMap = sled::Db;
@@ -67,8 +57,7 @@ where
     }
 
     pub fn delete_queue(&self, queue_name: String, id: String) -> QueueResult<()> {
-        let mut queue_b = self.queue_broadcasts.lock().unwrap();
-        let queue = get_queue_broadcast(queue_name.clone(), &mut queue_b);
+        let queue = get_queue_broadcast(queue_name.clone(), &self.queue_meta);
         queue.keys.remove(&id);
 
         let mut batch = Batch::default();
@@ -94,6 +83,8 @@ where
             return Ok(Default::default());
         }
 
+        let tree = self.map.open_tree(queue_name.as_bytes())?;
+
         let mut prev_items = get_prev_items::<T>(&tree, &id, sequence)?;
 
         if let Some(last) = prev_items.as_mut().and_then(|vec| vec.last_mut()) {
@@ -103,7 +94,7 @@ where
         let prev_len = prev_items.as_ref().map(|i| i.len());
 
         let queue = get_queue_broadcast(queue_name, &self.queue_meta);
-        let key_sender = get_key_broadcast(&id, &queue)?;
+        let key_sender = get_key_broadcast(&id, &queue);
 
         let recv = key_sender.sender.subscribe();
 
@@ -122,7 +113,9 @@ where
             return Ok(Default::default());
         }
 
-        let mut prev_items = get_prev_all_items::<T>(&self.map, sequence)?;
+        let tree = self.map.open_tree(queue_name.as_bytes())?;
+
+        let mut prev_items = get_prev_all_items::<T>(&tree, sequence)?;
 
         if let Some(last) = prev_items.as_mut().and_then(|vec| vec.last_mut()) {
             last.set_last(true)
@@ -140,9 +133,13 @@ where
         })
     }
 
-    pub fn send_to_queue(&self, queue_name: String, mut value: T) -> QueueResult<bool> {
+    pub fn send_to_queue(
+        &self,
+        queue_name: String,
+        mut value: T,
+    ) -> QueueResult<(bool, Option<SequenceId>)> {
         if !self.check_tree_exists(&queue_name) {
-            return Ok(false);
+            return Ok((false, None));
         }
 
         let id = value.get_id();
@@ -163,7 +160,7 @@ where
 
             let tree = self.map.open_tree(queue_name.as_bytes())?;
 
-            tree.insert(id, serde_json::to_vec(&value)?)?;
+            tree.insert(id, rmp_serde::to_vec(&value)?)?;
 
             if let Some(m) = self.max_key_updates {
                 let mut batch = Batch::default();
@@ -181,25 +178,17 @@ where
             }
         }
 
-        let mut map = self.queue_broadcasts.lock().unwrap();
-
-        let queue = get_queue_broadcast(queue_name, &mut map);
-        if let Err(e) = queue.sender.send(value.clone()) {
-            error!("broadcast message to queue subscribers error: {}", e)
-        }
+        let queue = get_queue_broadcast(queue_name, &self.queue_meta);
+        let _ = queue.sender.send(value.clone());
 
         let key_sender = get_key_broadcast(value.get_id(), &queue);
-        if let Err(e) = key_sender.send(value) {
-            error!("broadcast message to key subscribers error: {}", e)
-        }
+        let _ = key_sender.sender.send(value);
 
-        Ok(true)
+        Ok((true, SequenceId::new(sequence)))
     }
 
     pub fn close_queue(&self, queue_name: String) -> QueueResult<bool> {
-        let mut queue_b = self.queue_broadcasts.lock().unwrap();
-        queue_b.remove(&queue_name);
-        queue_b.remove(&queue_name);
+        self.queue_meta.remove(&queue_name);
 
         self.map.drop_tree(queue_name).map_err(QueueError::from)
     }
@@ -270,7 +259,7 @@ fn get_prev_items<T: DeserializeOwned>(
                 .map(|r| {
                     r.map(|(_, v)| v)
                         .map_err(QueueError::from)
-                        .and_then(|v| serde_json::from_slice(&v).map_err(QueueError::from))
+                        .and_then(|v| rmp_serde::from_slice(&v).map_err(QueueError::from))
                 })
                 .collect()
         })
@@ -289,7 +278,7 @@ fn extract_sequences(
     }
 }
 
-fn get_prev_all_items<T: DeserializeOwned + UniqId>(
+fn get_prev_all_items<T: DeserializeOwned + SequenceEvent + UniqIdEvent>(
     tree: &Tree,
     sequence: RequestSequence,
 ) -> QueueResult<Option<Vec<T>>> {
@@ -297,7 +286,7 @@ fn get_prev_all_items<T: DeserializeOwned + UniqId>(
         .map(|sequence_id| {
             let i = tree.iter().values().map(|v| {
                 v.map_err(QueueError::from)
-                    .and_then(|v| serde_json::from_slice(&v).map_err(QueueError::from))
+                    .and_then(|v| rmp_serde::from_slice(&v).map_err(QueueError::from))
             });
 
             let i: Box<dyn Iterator<Item = Result<T, QueueError>>> = match sequence_id {
@@ -404,51 +393,4 @@ impl<'a, T> Default for Subscription<'a, T> {
             preloaded_count: None,
         }
     }
-}
-
-fn create_rocks_opts(max_keys: usize) -> Options {
-    let mut opts = Options::default();
-    opts.create_missing_column_families(true);
-    opts.create_if_missing(true);
-    opts.set_compression_type(DBCompressionType::Zstd);
-    opts.set_enable_pipelined_write(true);
-    opts.set_level_compaction_dynamic_level_bytes(true);
-    opts.set_advise_random_on_open(false);
-
-    opts.set_prefix_extractor(SliceTransform::create(
-        "events_prefix_extractor",
-        prefix_extractor,
-        Some(is_valid_domain),
-    ));
-
-    opts.increase_parallelism(num_cpus::get_physical() as i32);
-
-    let mut factory = BlockBasedOptions::default();
-    factory.set_index_type(BlockBasedIndexType::BinarySearch);
-    factory.set_data_block_index_type(DataBlockIndexType::BinaryAndHash);
-    factory.set_bloom_filter(10., true);
-    factory.set_hybrid_ribbon_filter(10., 2);
-
-    opts.set_block_based_table_factory(&factory);
-
-    let factory = MemtableFactory::HashSkipList {
-        bucket_count: max_keys * 100,
-        height: 12,
-        branching_factor: 4,
-    };
-
-    opts.set_allow_concurrent_memtable_write(false);
-    opts.set_memtable_factory(factory);
-
-    opts.optimize_universal_style_compaction(64 * 1024 * 1024 * 1024);
-
-    opts
-}
-
-fn prefix_extractor(prefix: &[u8]) -> &[u8] {
-    &prefix[0..prefix.len() - 1 - std::mem::size_of::<SequenceId>()]
-}
-
-fn is_valid_domain(prefix: &[u8]) -> bool {
-    prefix.len() > std::mem::size_of::<SequenceId>()
 }

@@ -62,8 +62,8 @@ features = ["tls"]
 [dependencies.sled]
 version = "0.34"
 features = ["compression"]
-git = "https://github.com/spacejam/sled"
-rev = "e95ec05"
+git = "https://github.com/Mnwa/sled"
+rev = "7a1d06e"
 
 [dependencies.dashmap]
 version = "5"
