@@ -1,6 +1,6 @@
 [package]
 name = "sonya"
-version = "0.10.2"
+version = "0.11.0"
 edition = "2021"
 description = "Backends for your web queue cluster"
 repository = "https://github.com/Mnwa/sonya"
@@ -75,5 +75,5 @@ version = "1"
 version = "1"
 
 [dependencies.sonya-meta]
-version = "0.10"
+version = "0.11"
 path = "../sonya-meta"
